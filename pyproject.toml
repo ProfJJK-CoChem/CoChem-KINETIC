@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cochem-kinetic"
+version = "4.0.0"
+description = "CoChem-KINETIC: Thermochemistry, Tunneling, Reaction Kinetics and IRC Engine"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+    "h5py>=3.0.0"
+]
+
+[project.optional-dependencies]
+jax = ["jax>=0.4.0", "jaxlib>=0.4.0"]
+mace = ["mace-torch>=0.3.0", "ase>=3.22.0"]
+viz = ["py3Dmol>=2.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
