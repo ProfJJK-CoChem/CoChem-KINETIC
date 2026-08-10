@@ -75,10 +75,18 @@ def test_vtst_and_landau_zener():
     max_g = variational_tst_correction(irc_energies, irc_zpes, temp=298.15)
     assert abs(max_g - 14.0) < 1e-4
 
-    # KINETIC-05: Landau-Zener zero-division guard
-    prob_zero_v = landau_zener_probability(v12=0.1, force_diff=1.0, velocity=0.0)
-    assert prob_zero_v == 0.0
-    prob_valid = landau_zener_probability(v12=0.1, force_diff=1.0, velocity=100.0)
+    # KINETIC-05 / Suggestion 46: Landau-Zener formula (diabatic survival vs adiabatic transition)
+    prob_zero_v_diab = landau_zener_probability(v12=0.1, force_diff=1.0, velocity=0.0, return_type="diabatic")
+    assert prob_zero_v_diab == 1.0
+    prob_zero_v_adiab = landau_zener_probability(v12=0.1, force_diff=1.0, velocity=0.0, return_type="adiabatic")
+    assert prob_zero_v_adiab == 0.0
+
+    prob_zero_coupling_diab = landau_zener_probability(v12=0.0, force_diff=1.0, velocity=100.0, return_type="diabatic")
+    assert prob_zero_coupling_diab == 1.0
+    prob_zero_coupling_adiab = landau_zener_probability(v12=0.0, force_diff=1.0, velocity=100.0, return_type="adiabatic")
+    assert prob_zero_coupling_adiab == 0.0
+
+    prob_valid = landau_zener_probability(v12=0.1, force_diff=1.0, velocity=100.0, return_type="diabatic")
     assert 0.0 <= prob_valid <= 1.0
 
 
@@ -152,4 +160,169 @@ def test_calculate_vtst_rate():
     assert res['k_vtst'] > 0
     assert res['bottleneck_index'] == 2
     assert res['tunneling_kappa'] >= 1.0
+
+
+# --- Milestone M5 Integration Tests (KINETIC-01 to KINETIC-06) ---
+
+def test_kinetic_01_pes_store_interface(tmp_path):
+    from kinetic_core.cochem_pes_store import PESStore
+    import h5py
+
+    h5_file = tmp_path / "test_pes_store.h5"
+    store = PESStore(h5_file, provenance_tag="[M]")
+
+    # Append single point
+    coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    energy = -76.25
+    gradient = np.array([[0.01, 0.0, 0.0], [-0.01, 0.0, 0.0]])
+    store.append_point(coords, energy, gradient, group="grid")
+
+    # Append batch
+    batch_coords = np.zeros((5, 2, 3))
+    batch_energies = np.linspace(-76.2, -76.0, 5)
+    batch_variances = np.full(5, 0.001)
+    store.append_batch(batch_coords, batch_energies, variance_batch=batch_variances, group="fit")
+
+    grid_data = store.get_grid()
+    fit_data = store.get_fit()
+
+    assert "coordinates" in grid_data
+    assert "energies" in grid_data
+    assert "gradients" in grid_data
+    assert len(grid_data["energies"]) == 1
+
+    assert "fit_energies" in fit_data
+    assert len(fit_data["fit_energies"]) == 5
+
+    with h5py.File(h5_file, "r") as f:
+        coords_ds = f["/pes/grid/coordinates"]
+        assert coords_ds.chunks[0] == 512
+        assert coords_ds.compression == "gzip"
+        assert coords_ds.compression_opts == 4
+        assert coords_ds.fletcher32 is True
+        assert f["/pes/grid"].attrs["qcschema_version"] == 2
+        assert f["/pes/grid"].attrs["provenance_tag"] == "[M]"
+
+
+def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard():
+    from kinetic_core.mace_pre_opt import MACEPreOptimizer
+
+    mace_opt = MACEPreOptimizer()
+    assert hasattr(mace_opt, "FLOAT32_NOISE_FLOOR")
+    assert mace_opt.FLOAT32_NOISE_FLOOR == 1e-5
+
+    # Test noise guard logic
+    prev_g = np.array([[0.0001, 0.0, 0.0]])
+    curr_g = np.array([[-0.0001, 0.0, 0.0]])
+    # Sign flip in low force regime should trigger guard
+    triggered = mace_opt.apply_float32_noise_guard(prev_g, curr_g, prev_energy=-10.0, curr_energy=-10.0000001)
+    assert triggered is True
+
+    # Test relaxation without pairwise LJ
+    coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
+    opt_c, e = mace_opt.pre_relax_geometry(["O", "H", "H"], coords, max_steps=5, fmax=0.05)
+    assert opt_c.shape == (3, 3)
+    assert isinstance(e, float)
+
+
+def test_kinetic_03_dispatcher_v4_budgets_and_d1_d5_rules(tmp_path):
+    from kinetic_core.dispatcher import KineticDispatcher, V4_WALLCLOCK_BUDGETS
+    from kinetic_core.cochem_pes_store import PESStore
+
+    disp = KineticDispatcher(tmp_path)
+
+    # 1. 10-tier budgets check
+    assert len(V4_WALLCLOCK_BUDGETS) == 10
+    assert disp.get_tier_budget("T1-10s") == 10.0
+    assert disp.get_tier_budget("T4-1mo") == 2592000.0
+
+    # 2. Rule D1 (Stationary point)
+    grad_small = np.array([[1e-5, 0.0, 0.0]])
+    grad_large = np.array([[1e-2, 0.0, 0.0]])
+    assert disp.check_d1_stationary_point(grad_small, tol=1e-4) is True
+    assert disp.check_d1_stationary_point(grad_large, tol=1e-4) is False
+
+    # 3. Rule D2 (Hessian mode match)
+    freqs_prev = np.array([-150.0, 200.0, 300.0])
+    freqs_curr = np.array([-155.0, 205.0, 305.0])
+    assert disp.check_d2_hessian_mode_match(freqs_prev, freqs_curr, is_ts=True, tol=50.0) is True
+
+    # 4. Rule D3 (SCF basin check)
+    d1 = np.eye(3)
+    d2 = np.eye(3) + 1e-4
+    assert disp.check_d3_scf_basin(d1, d2, tol=1e-3) is True
+
+    # 5. Rule D4 (Ghost atom match)
+    assert disp.check_d4_cp_ghost_match([1, 2], [2, 1]) is True
+    assert disp.check_d4_cp_ghost_match([1, 2], [1, 3]) is False
+
+    # 6. Rule D5 (Safe overwrite)
+    meta_prev = {"wallclock_tier": "T1-30min"}
+    meta_higher = {"wallclock_tier": "T2-1h"}
+    meta_lower = {"wallclock_tier": "T1-10s"}
+    assert disp.check_d5_safe_overwrite(meta_prev, meta_higher) is True
+    assert disp.check_d5_safe_overwrite(meta_prev, meta_lower) is False
+
+    # 7. Write state with PESStore integration
+    h5_path = tmp_path / "cochem_state.h5"
+    pes_store = PESStore(h5_path)
+    disp.write_state_hdf5(
+        h5_path,
+        thermo_data={"delta_g_barrier": 15.0},
+        irc_coords=np.zeros((3, 3)),
+        irc_energies=np.array([0.0, 15.0, 2.0]),
+        tier_name="T2-1h",
+        pes_store=pes_store,
+    )
+    assert h5_path.exists()
+
+
+def test_kinetic_04_cineb_pes_store_streaming(tmp_path):
+    from kinetic_core.jax_cineb import JACXCINEBEngine
+    from kinetic_core.cochem_pes_store import PESStore
+
+    neb = JACXCINEBEngine(k_spring=0.1)
+    images = np.array([
+        [[0.0, 0.0, 0.0]],
+        [[0.5, 0.0, 0.0]],
+        [[1.0, 0.0, 0.0]]
+    ])
+    def dummy_fn(img):
+        return float(np.sum(img**2)), 2.0 * img
+
+    h5_path = tmp_path / "cineb_pes.h5"
+    opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=3, pes_store=str(h5_path))
+
+    store = PESStore(h5_path)
+    grid = store.get_grid()
+    assert "coordinates" in grid
+    assert len(grid["energies"]) > 0
+
+
+def test_kinetic_05_path_integral_bead_calculator():
+    from kinetic_core.aimd_hoover import calculate_required_beads
+
+    p_300k = calculate_required_beads(300.0, 3000.0)
+    assert p_300k >= 32
+
+    p_100k = calculate_required_beads(100.0, 3000.0)
+    assert p_100k >= 95
+
+    with pytest.raises(ValueError):
+        calculate_required_beads(0.0, 3000.0)
+
+
+def test_kinetic_06_prohibit_classical_md_absolute_b0():
+    from kinetic_core.aimd_hoover import compute_rotational_constants_md
+
+    coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
+    masses = np.array([16.0, 1.0, 1.0])
+
+    res = compute_rotational_constants_md(coords, masses, is_classical_md=True)
+    assert res["provenance_tag"] == "[E]"
+    assert res["is_absolute_b0"] is False
+    assert "WARNING" in res["warning"]
+    assert "Classical MD cannot yield absolute B0" in res["warning"]
+    assert len(res["rotational_constants_cm1"]) == 3
+
 

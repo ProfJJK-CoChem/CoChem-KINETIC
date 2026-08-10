@@ -4,11 +4,20 @@ CoChem-KINETIC - Stage 2: JAX-Accelerated CI-NEB Engine
 -------------------------------------------------------
 Implements Henkelman tangent estimation, climbing image force projection,
 and spring force calculations for Climbing Image Nudged Elastic Band (CI-NEB).
+Streams trajectory step frames directly to PESStore HDF5 per §8C.
 """
 
 import logging
 import numpy as np
-from typing import List, Tuple, Callable, Optional
+from typing import List, Tuple, Callable, Optional, Union
+
+try:
+    from kinetic_core.cochem_pes_store import PESStore
+except ImportError:
+    try:
+        from cochem_pes_store import PESStore
+    except ImportError:
+        PESStore = None
 
 
 class JACXCINEBEngine:
@@ -82,13 +91,29 @@ class JACXCINEBEngine:
 
         return forces
 
-    def optimize_path(self, initial_images: np.ndarray, energy_grad_fn: Callable, max_iter: int = 50, step_size: float = 0.05) -> Tuple[np.ndarray, np.ndarray]:
+    def optimize_path(
+        self,
+        initial_images: np.ndarray,
+        energy_grad_fn: Callable,
+        max_iter: int = 50,
+        step_size: float = 0.05,
+        pes_store: Optional[Union[PESStore, str]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Runs CI-NEB path optimization loop.
+        Runs CI-NEB path optimization loop. Streams trajectory step frames directly to PESStore (§8C).
         """
         images = initial_images.copy()
         n_images = len(images)
-        
+
+        # Initialize or resolve PESStore instance if string path provided
+        store_inst = None
+        if pes_store is not None:
+            if isinstance(pes_store, str):
+                if PESStore is not None:
+                    store_inst = PESStore(pes_store)
+            else:
+                store_inst = pes_store
+
         for iteration in range(max_iter):
             energies = np.zeros(n_images)
             gradients = np.zeros_like(images)
@@ -99,7 +124,24 @@ class JACXCINEBEngine:
 
             climbing_idx = int(np.argmax(energies))
             forces = self.compute_neb_forces(images, gradients, energies, climbing_index=climbing_idx)
-            max_force = float(np.max(np.linalg.norm(forces[1:-1], axis=(1,2))))
+            max_force = float(np.max(np.linalg.norm(forces[1:-1], axis=(1, 2)))) if n_images > 2 else float(np.max(np.linalg.norm(forces)))
+
+            # Stream step frames directly to PESStore HDF5 under /pes/grid (§8C)
+            if store_inst is not None:
+                try:
+                    store_inst.append_batch(
+                        coords_batch=images,
+                        energy_batch=energies,
+                        gradient_batch=gradients,
+                        group="grid",
+                        metadata={
+                            "iteration": iteration,
+                            "climbing_index": climbing_idx,
+                            "max_force": max_force,
+                        },
+                    )
+                except Exception as exc:
+                    self.logger.warning(f"Could not stream iteration {iteration} frame to PESStore: {exc}")
 
             if max_force < 0.05:
                 self.logger.info(f"CI-NEB converged at iteration {iteration} with max force {max_force:.4f}")
@@ -127,3 +169,4 @@ if __name__ == "__main__":
 
     opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=5)
     print("CI-NEB Engine test passed.")
+

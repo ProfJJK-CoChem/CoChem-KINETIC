@@ -148,20 +148,27 @@ def calculate_vtst_rate(
     }
 
 
-def landau_zener_probability(v12: float, force_diff: float, velocity: float) -> float:
+def landau_zener_probability(v12: float, force_diff: float, velocity: float, return_type: str = "diabatic") -> float:
     """
-    Landau-Zener non-adiabatic intersystem crossing probability.
+    Landau-Zener non-adiabatic intersystem crossing probability (Suggestion 46).
     v12: Spin-orbit coupling matrix element (in eV)
     force_diff: Difference in slopes (forces) between surfaces (eV/Angstrom)
     velocity: Nuclear velocity passing the crossing point (Angstrom/s)
+    return_type: "diabatic" returns diabatic state survival probability P_diab = exp(-gamma) (1.0 at v12=0).
+                 "adiabatic" or "crossing" returns adiabatic transition probability P_adiab = 1.0 - exp(-gamma).
     Zero-division guarded.
     """
-    if velocity <= 0.0 or abs(force_diff) <= 1e-12:
-        return 0.0
+    if velocity <= 0.0 or abs(force_diff) <= 1e-12 or abs(v12) <= 1e-12:
+        return 1.0 if return_type == "diabatic" else 0.0
 
     hbar = 6.582119569e-16 # eV*s
     gamma = (2.0 * np.pi * (v12**2)) / (hbar * velocity * np.abs(force_diff))
-    prob = 1.0 - np.exp(-gamma)
+    
+    if return_type == "diabatic":
+        prob = np.exp(-gamma)
+    else:
+        prob = 1.0 - np.exp(-gamma)
+
     return float(np.clip(prob, 0.0, 1.0))
 
 
