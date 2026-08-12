@@ -9,7 +9,7 @@ Streams trajectory step frames directly to PESStore HDF5 per §8C.
 
 import logging
 import numpy as np
-from typing import List, Tuple, Callable, Optional, Union
+from typing import Any, List, Tuple, Callable, Optional, Union
 
 try:
     from kinetic_core.cochem_pes_store import PESStore
@@ -23,7 +23,7 @@ except ImportError:
 class JACXCINEBEngine:
     """Climbing Image Nudged Elastic Band (CI-NEB) Path Optimization Engine."""
 
-    def __init__(self, k_spring: float = 0.1):
+    def __init__(self, k_spring: float = 0.1) -> None:
         self.k_spring = k_spring
         self.logger = logging.getLogger("CoChem_KINETIC_CINEB")
 
@@ -161,12 +161,11 @@ if __name__ == "__main__":
         [[0.5,0.2,0.0], [0.0,0.0,1.0]],
         [[1.0,0.0,0.0], [0.0,0.0,1.0]]
     ])
-    def dummy_fn(img):
+    def dummy_fn(img) -> Any:
         # Harmonic well
         val = np.sum(img**2)
         grad = 2.0 * img
         return val, grad
 
     opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=5)
-    print("CI-NEB Engine test passed.")
-
+    logger.info("CI-NEB Engine test passed.")

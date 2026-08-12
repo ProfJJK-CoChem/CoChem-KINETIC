@@ -8,13 +8,13 @@ starting from a transition state geometry along forward and reverse mass-weighte
 
 import logging
 import numpy as np
-from typing import Tuple, List, Callable, Optional
+from typing import Any, Tuple, List, Callable, Optional
 
 
 class IRCTracerEngine:
     """Bidirectional IRC Path Integrator using Page-McIver / Gonzalez-Schlegel math."""
 
-    def __init__(self, step_size_amu_ang: float = 0.1):
+    def __init__(self, step_size_amu_ang: float = 0.1) -> None:
         self.step_size = step_size_amu_ang
         self.logger = logging.getLogger("CoChem_KINETIC_IRC")
 
@@ -27,7 +27,7 @@ class IRCTracerEngine:
         mode_mw = imag_mode_vector * mw
         mode_mw /= max(np.linalg.norm(mode_mw), 1e-12)
 
-        def _step_direction(direction_sign: float):
+        def _step_direction(direction_sign: float) -> Any:
             coords = ts_coords.copy() + direction_sign * (self.step_size / np.maximum(mw, 1e-6)) * mode_mw
             path = [coords.copy()]
             energies = []
@@ -75,6 +75,6 @@ if __name__ == "__main__":
     ts = np.array([[0.0,0.0,0.0], [0.0,0.0,1.2]])
     m = np.array([16.0, 1.0])
     mode = np.array([[0.0,0.0,1.0], [0.0,0.0,-1.0]])
-    def dummy_grad(c): return 2.0 * c
+    def dummy_grad(c) -> Any: return 2.0 * c
     path, e = tracer.trace_irc_path(ts, m, mode, dummy_grad, max_steps=5)
-    print(f"IRC Tracer test passed. Path images: {len(path)}")
+    logger.info(f"IRC Tracer test passed. Path images: {len(path)}")

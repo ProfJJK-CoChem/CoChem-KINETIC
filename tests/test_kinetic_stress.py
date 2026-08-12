@@ -1,9 +1,11 @@
+import hashlib
+from typing import Any, Dict, List, Optional
 #!/usr/bin/env python3
 """
 CoChem-KINETIC Empirical Stress Test Suite
 ------------------------------------------
 Comprehensive adversarial and edge-case stress harness testing:
-1. PESStore creation, concurrent writes, large dataset append, corruption checks, HDF5 compression and Fletcher32 checksum validation.
+    1. PESStore creation, concurrent writes, large dataset append, corruption checks, HDF5 compression and Fletcher32 checksum validation.
 2. mace_pre_opt.py optimization under noisy gradients (Float32 noise floor edge cases, fmax floor, sign-flip halting).
 3. State chaining rules D1-D5 in dispatcher.py with edge-case stationary point gradients, frequency shifts, density differences, and ghost atom mismatches.
 4. Bead count calculator for high/low temperatures (10 K, 300 K, 1000 K) and high/low vibrational frequencies.
@@ -32,7 +34,7 @@ from kinetic_core.aimd_hoover import calculate_required_beads, compute_rotationa
 class TestPESStoreStress:
     """Stress tests for PESStore HDF5 interface (§8C)."""
 
-    def test_pes_store_creation_and_attributes(self, tmp_path):
+    def test_pes_store_creation_and_attributes(self, tmp_path) -> None:
         h5_file = tmp_path / "pes_test_attr.h5"
         store = PESStore(h5_file, provenance_tag="[M]")
         
@@ -43,7 +45,7 @@ class TestPESStoreStress:
                 assert grp.attrs["qcschema_version"] == 2
                 assert grp.attrs["provenance_tag"] == "[M]"
 
-    def test_pes_store_readonly_mode_bug(self, tmp_path):
+    def test_pes_store_readonly_mode_bug(self, tmp_path) -> None:
         """
         Tests opening PESStore in read-only mode ('r').
         Empirical finding: PESStore.__init__ attempts to set attributes on group init,
@@ -62,7 +64,7 @@ class TestPESStoreStress:
         except KeyError as e:
             pytest.fail(f"PESStore failed to open in read-only mode 'r': KeyError ({e})")
 
-    def test_pes_store_hdf5_compression_shuffle_fletcher32(self, tmp_path):
+    def test_pes_store_hdf5_compression_shuffle_fletcher32(self, tmp_path) -> None:
         h5_file = tmp_path / "pes_compression.h5"
         store = PESStore(h5_file)
         
@@ -86,7 +88,7 @@ class TestPESStoreStress:
             assert ds_e.chunks[0] == 512
             assert ds_e.fletcher32 is True
 
-    def test_pes_store_large_dataset_append(self, tmp_path):
+    def test_pes_store_large_dataset_append(self, tmp_path) -> None:
         h5_file = tmp_path / "pes_large.h5"
         store = PESStore(h5_file)
         
@@ -103,7 +105,7 @@ class TestPESStoreStress:
         assert grid["energies"].shape == (5500,)
         assert grid["energies"][-1] == -100.0 + 10
 
-    def test_pes_store_single_point_and_uncertainty(self, tmp_path):
+    def test_pes_store_single_point_and_uncertainty(self, tmp_path) -> None:
         h5_file = tmp_path / "pes_single.h5"
         store = PESStore(h5_file)
         
@@ -116,7 +118,7 @@ class TestPESStoreStress:
         assert unc["variance"].shape == (1,)
         assert np.isclose(unc["variance"][0], 0.001)
 
-    def test_pes_store_fletcher32_checksum_validation_on_corruption(self, tmp_path):
+    def test_pes_store_fletcher32_checksum_validation_on_corruption(self, tmp_path) -> None:
         h5_file = tmp_path / "pes_corrupt.h5"
         store = PESStore(h5_file)
         
@@ -136,7 +138,7 @@ class TestPESStoreStress:
                 _ = h5_read["/pes/grid/coordinates"][:]
         assert exc_info.value is not None
 
-    def test_pes_store_concurrent_thread_writes(self, tmp_path):
+    def test_pes_store_concurrent_thread_writes(self, tmp_path) -> None:
         """
         Tests multi-threaded concurrent write safety.
         Empirical finding: Race condition in _get_or_create_dataset when dataset does not exist yet.
@@ -145,7 +147,7 @@ class TestPESStoreStress:
         store = PESStore(h5_file)
         errors = []
 
-        def worker_append(thread_id):
+        def worker_append(thread_id) -> Any:
             try:
                 coords = np.full((10, 2, 3), float(thread_id))
                 energies = np.full(10, float(thread_id))
@@ -174,7 +176,7 @@ class TestPESStoreStress:
 class TestMACEPreOptimizerStress:
     """Stress tests for MACE-OFF24m pre-optimizer and Float32 guards (§8A.2, §16.1)."""
 
-    def test_float32_noise_guard_energy_floor(self):
+    def test_float32_noise_guard_energy_floor(self) -> None:
         pre_opt = MACEPreOptimizer()
         
         # Energy change below 1e-5 -> True (stop optimization)
@@ -195,7 +197,7 @@ class TestMACEPreOptimizerStress:
         )
         assert stopped is False
 
-    def test_float32_noise_guard_gradient_sign_flip(self):
+    def test_float32_noise_guard_gradient_sign_flip(self) -> None:
         pre_opt = MACEPreOptimizer()
         
         # Low force regime (< 1e-3) with gradient sign flip (dot product < -0.2 * n1 * n2)
@@ -209,7 +211,7 @@ class TestMACEPreOptimizerStress:
         )
         assert stopped is True
 
-    def test_float32_noise_guard_edge_cases(self):
+    def test_float32_noise_guard_edge_cases(self) -> None:
         pre_opt = MACEPreOptimizer()
         
         # Zero gradients (norms = 0)
@@ -222,7 +224,7 @@ class TestMACEPreOptimizerStress:
         stopped = pre_opt.apply_float32_noise_guard(None, curr_g, prev_energy=None, curr_energy=-10.0)
         assert stopped is False
 
-    def test_fmax_floor_guard(self):
+    def test_fmax_floor_guard(self) -> None:
         pre_opt = MACEPreOptimizer()
         # Ensure fmax passed as 1e-6 is guarded to max(1e-6, 1e-3) = 1e-3
         syms = ["O", "H", "H"]
@@ -232,7 +234,7 @@ class TestMACEPreOptimizerStress:
         assert rel_coords.shape == (3, 3)
         assert isinstance(e, float)
 
-    def test_absence_of_pairwise_lennard_jones_potential_formulas(self):
+    def test_absence_of_pairwise_lennard_jones_potential_formulas(self) -> None:
         """
         Verifies zero pairwise Lennard-Jones potential calculation formulas exist in code per §8A.2.
         Ignores docstring text prohibiting LJ.
@@ -259,11 +261,11 @@ class TestStateChainingRulesStress:
     """Stress tests for state chaining rules D1-D5 in dispatcher.py (§8B)."""
 
     @pytest.fixture
-    def dispatcher(self):
+    def dispatcher(self) -> Any:
         return KineticDispatcher()
 
     # --- Rule D1: Stationary Point Check ---
-    def test_rule_d1_stationary_point(self, dispatcher):
+    def test_rule_d1_stationary_point(self, dispatcher) -> None:
         # Grad norm < 1e-4 -> Pass
         g_pass = np.array([[1e-5, 2e-5, -1e-5], [0.0, 3e-5, 1e-5]])
         assert dispatcher.check_d1_stationary_point(g_pass, tol=1e-4) is True
@@ -281,7 +283,7 @@ class TestStateChainingRulesStress:
         assert dispatcher.check_d1_stationary_point(g_1d, tol=1e-4) is True
 
     # --- Rule D2: Hessian Mode Match ---
-    def test_rule_d2_hessian_mode_match(self, dispatcher):
+    def test_rule_d2_hessian_mode_match(self, dispatcher) -> None:
         # TS mode (is_ts=True): requires exactly 1 imaginary freq
         freqs_prev_ts = np.array([-300.0, 150.0, 300.0])
         freqs_curr_ts = np.array([-320.0, 155.0, 310.0])
@@ -300,7 +302,7 @@ class TestStateChainingRulesStress:
         freqs_far = np.array([200.0, 200.0, 300.0])
         assert dispatcher.check_d2_hessian_mode_match(freqs_min1, freqs_far, is_ts=False, tol=50.0) is False
 
-    def test_rule_d2_empty_frequencies_edge_case(self, dispatcher):
+    def test_rule_d2_empty_frequencies_edge_case(self, dispatcher) -> None:
         """
         Edge case test: Empty frequency array should return False without crashing.
         Empirical finding: Currently crashes with IndexError on freqs_prev[0].
@@ -312,7 +314,7 @@ class TestStateChainingRulesStress:
             pytest.fail(f"Rule D2 crashed with IndexError on empty frequency arrays: {e}")
 
     # --- Rule D3: SCF Basin Check ---
-    def test_rule_d3_scf_basin(self, dispatcher):
+    def test_rule_d3_scf_basin(self, dispatcher) -> None:
         d1 = np.eye(4) * 0.5
         d2 = d1 + np.eye(4) * 1e-4  # norm diff = sqrt(4 * 1e-8) = 2e-4 < 1e-3
         assert dispatcher.check_d3_scf_basin(d1, d2, tol=1e-3) is True
@@ -320,7 +322,7 @@ class TestStateChainingRulesStress:
         d3 = d1 + np.eye(4) * 0.1  # norm diff = 0.2 > 1e-3
         assert dispatcher.check_d3_scf_basin(d1, d3, tol=1e-3) is False
 
-    def test_rule_d3_shape_mismatch_edge_case(self, dispatcher):
+    def test_rule_d3_shape_mismatch_edge_case(self, dispatcher) -> None:
         """
         Edge case test: Density matrices with different dimensions (e.g. cross-tier basis upgrade).
         Empirical finding: Currently crashes with ValueError (cannot subtract 3x3 from 5x5).
@@ -334,7 +336,7 @@ class TestStateChainingRulesStress:
             pytest.fail(f"Rule D3 crashed with ValueError on density matrix shape mismatch across tiers: {e}")
 
     # --- Rule D4: Counterpoise Ghost Match ---
-    def test_rule_d4_cp_ghost_match(self, dispatcher):
+    def test_rule_d4_cp_ghost_match(self, dispatcher) -> None:
         ghosts1 = [1, 3, 5]
         ghosts2 = [5, 1, 3]  # Same indices, different order
         assert dispatcher.check_d4_cp_ghost_match(ghosts1, ghosts2) is True
@@ -342,7 +344,7 @@ class TestStateChainingRulesStress:
         ghosts3 = [1, 3, 4]
         assert dispatcher.check_d4_cp_ghost_match(ghosts1, ghosts3) is False
 
-    def test_rule_d4_none_ghost_atoms_edge_case(self, dispatcher):
+    def test_rule_d4_none_ghost_atoms_edge_case(self, dispatcher) -> None:
         """Edge case test: None passed for ghost atom list."""
         try:
             res = dispatcher.check_d4_cp_ghost_match(None, [1, 2])
@@ -351,7 +353,7 @@ class TestStateChainingRulesStress:
             pytest.fail(f"Rule D4 crashed with TypeError when None passed for ghost atoms: {e}")
 
     # --- Rule D5: Safe Overwrite ---
-    def test_rule_d5_safe_overwrite(self, dispatcher):
+    def test_rule_d5_safe_overwrite(self, dispatcher) -> None:
         # Higher or equal tier can overwrite
         meta_prev = {"wallclock_tier": "T1-30min"}
         meta_curr = {"wallclock_tier": "T2-1h"}
@@ -365,7 +367,7 @@ class TestStateChainingRulesStress:
         meta_lower = {"wallclock_tier": "T1-10s"}
         assert dispatcher.check_d5_safe_overwrite(meta_prev, meta_lower) is False
 
-    def test_v4_wallclock_budgets_mapping(self, dispatcher):
+    def test_v4_wallclock_budgets_mapping(self, dispatcher) -> None:
         assert len(V4_WALLCLOCK_BUDGETS) == 10
         assert dispatcher.get_tier_budget("T1-10s") == 10.0
         assert dispatcher.get_tier_budget("T1-30min") == 1800.0
@@ -392,12 +394,12 @@ class TestBeadCountCalculatorStress:
             (1000.0, 200.0, 1),    # High temp, low freq -> 1 bead
         ],
     )
-    def test_bead_count_temperature_and_frequency_sweeps(self, temp_k, w_max_cm1, expected_min_beads):
+    def test_bead_count_temperature_and_frequency_sweeps(self, temp_k, w_max_cm1, expected_min_beads) -> None:
         beads = calculate_required_beads(temp_k, w_max_cm1)
         assert isinstance(beads, int)
         assert beads >= expected_min_beads
 
-    def test_bead_count_zero_or_negative_temperature(self):
+    def test_bead_count_zero_or_negative_temperature(self) -> None:
         with pytest.raises(ValueError):
             calculate_required_beads(0.0, 3000.0)
         with pytest.raises(ValueError):
@@ -411,7 +413,7 @@ class TestBeadCountCalculatorStress:
 class TestRotationalConstantMDFormattingStress:
     """Stress tests for rotational constant B0 prohibition guard (§11.1, §13.4)."""
 
-    def test_classical_md_b0_prohibition(self):
+    def test_classical_md_b0_prohibition(self) -> None:
         # Water molecule geometry
         coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
         masses = np.array([15.999, 1.008, 1.008])
@@ -423,7 +425,7 @@ class TestRotationalConstantMDFormattingStress:
         assert "WARNING: Classical MD cannot yield absolute B0" in res["warning"]
         assert len(res["rotational_constants_cm1"]) == 3
 
-    def test_non_classical_md_b0_allowed(self):
+    def test_non_classical_md_b0_allowed(self) -> None:
         coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
         masses = np.array([15.999, 1.008, 1.008])
 
@@ -433,7 +435,7 @@ class TestRotationalConstantMDFormattingStress:
         assert res["is_absolute_b0"] is True
         assert res["warning"] is None
 
-    def test_linear_molecule_rotational_constants(self):
+    def test_linear_molecule_rotational_constants(self) -> None:
         # CO2 linear geometry along Z axis
         coords = np.array([[0.0, 0.0, -1.16], [0.0, 0.0, 0.0], [0.0, 0.0, 1.16]])
         masses = np.array([15.999, 12.011, 15.999])
@@ -445,7 +447,7 @@ class TestRotationalConstantMDFormattingStress:
         assert rot_c[1] > 0.0
         assert np.isclose(rot_c[1], rot_c[2], rtol=1e-3)
 
-    def test_nose_hoover_aimd_transition_metal_dt_scaling(self):
+    def test_nose_hoover_aimd_transition_metal_dt_scaling(self) -> None:
         sampler = NoseHooverAIMDSampler(target_temp_k=300.0)
         
         # Non-transition metal species (H2O) -> default dt (1.0 fs)
@@ -455,3 +457,13 @@ class TestRotationalConstantMDFormattingStress:
         # Transition metal species (Fe, Cu, etc.) -> scaled dt (0.5 fs)
         dt_fe = sampler._determine_timestep(["Fe", "O", "O"])
         assert dt_fe == 0.5
+def calculate_artifact_sha256(filepath: str | Path) -> str:
+    """Calculates SHA-256 hash of a computational artifact."""
+    p = Path(filepath)
+    if not p.exists():
+        raise FileNotFoundError(f"Artifact file not found: {filepath}")
+    hasher = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()

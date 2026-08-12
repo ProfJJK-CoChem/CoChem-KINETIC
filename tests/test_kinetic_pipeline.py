@@ -1,9 +1,11 @@
+import hashlib
+from typing import Any, Dict, List, Optional
 #!/usr/bin/env python3
 """
 CoChem-KINETIC Automated PyTest Suite
 -------------------------------------
 Validates all 20 KINETIC items:
-- Wigner imaginary frequency sign fix & upper bounds
+    - Wigner imaginary frequency sign fix & upper bounds
 - Skodje-Truhlar tunneling for high barriers
 - Concentration standard state corrections in Eyring kinetics
 - Variational TST (VTST) free energy maximum profile search
@@ -51,7 +53,7 @@ from kinetic_core.irc_tracer import IRCTracerEngine
 from kinetic_core.viz import IRCAnimationVisualizer
 
 
-def test_wigner_and_tunneling_corrections():
+def test_wigner_and_tunneling_corrections() -> None:
     # KINETIC-01: Imaginary frequency sign check
     kappa_neg = wigner_correction(-1500.0, 298.15)
     assert kappa_neg > 1.0, "Wigner correction should handle negative imaginary frequency."
@@ -61,14 +63,14 @@ def test_wigner_and_tunneling_corrections():
     assert kappa_high >= 1.0 and kappa_high < 1e5
 
 
-def test_eyring_rate_and_order():
+def test_eyring_rate_and_order() -> None:
     # KINETIC-06: Reaction order standard state correction
     rate_1st = calculate_eyring_rate(delta_g=10.0, temp=298.15, reaction_order=1)
     rate_2nd = calculate_eyring_rate(delta_g=10.0, temp=298.15, reaction_order=2)
     assert rate_2nd != rate_1st, "Reaction order 2 should apply standard state concentration correction."
 
 
-def test_vtst_and_landau_zener():
+def test_vtst_and_landau_zener() -> None:
     # KINETIC-04: VTST free energy profile search
     irc_energies = np.array([0.0, 5.0, 12.5, 10.0, 2.0])
     irc_zpes = np.array([1.0, 1.1, 1.5, 1.2, 1.0])
@@ -90,7 +92,7 @@ def test_vtst_and_landau_zener():
     assert 0.0 <= prob_valid <= 1.0
 
 
-def test_troe_kie_and_diagnostics():
+def test_troe_kie_and_diagnostics() -> None:
     # KINETIC-13: Troe falloff
     k_troe = troe_falloff_rate(k_0=1e4, k_inf=1e8, P_atm=1.0, temp=298.15)
     assert 0.0 < k_troe < 1e8
@@ -105,7 +107,7 @@ def test_troe_kie_and_diagnostics():
         validate_multireference_diagnostics(0.035, 0.03)
 
 
-def test_hindered_rotors_and_solvation():
+def test_hindered_rotors_and_solvation() -> None:
     # KINETIC-16: Low frequency hindered rotor
     delta_g_hindered = pitzer_gwinn_hindered_rotor_correction(freq_cm1=50.0, barrier_kcal=2.5, temp=298.15)
     assert isinstance(delta_g_hindered, float)
@@ -115,11 +117,11 @@ def test_hindered_rotors_and_solvation():
     assert abs(solv_g - 10.0) < 1e-4
 
 
-def test_cineb_mace_aimd_and_irc():
+def test_cineb_mace_aimd_and_irc() -> None:
     # KINETIC-07: JAX CI-NEB
     neb = JACXCINEBEngine()
     images = np.array([[[0.0,0.0,0.0]], [[0.5,0.0,0.0]], [[1.0,0.0,0.0]]])
-    def dummy_fn(img): return np.sum(img**2), 2.0*img
+    def dummy_fn(img) -> Any: return np.sum(img**2), 2.0*img
     opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=2)
     assert len(opt_img) == 3
 
@@ -139,7 +141,7 @@ def test_cineb_mace_aimd_and_irc():
     assert len(path) > 0
 
 
-def test_dispatcher_and_viz(tmp_path):
+def test_dispatcher_and_viz(tmp_path) -> None:
     # KINETIC-10 & KINETIC-18: Dispatcher & HDF5
     disp = KineticDispatcher(tmp_path)
     h5_file = tmp_path / "cochem_state.h5"
@@ -151,7 +153,7 @@ def test_dispatcher_and_viz(tmp_path):
     html = viz.generate_html_animation("Test_Rxn", ["O", "H", "H"], np.zeros((2, 3, 3)))
     assert "3Dmol" in html
 
-def test_calculate_vtst_rate():
+def test_calculate_vtst_rate() -> None:
     from kinetic_core.thermo import calculate_vtst_rate
     s_coords = np.linspace(-1.0, 1.0, 5)
     energies = np.array([0.0, 5.0, 12.5, 10.0, 2.0])
@@ -164,7 +166,7 @@ def test_calculate_vtst_rate():
 
 # --- Milestone M5 Integration Tests (KINETIC-01 to KINETIC-06) ---
 
-def test_kinetic_01_pes_store_interface(tmp_path):
+def test_kinetic_01_pes_store_interface(tmp_path) -> None:
     from kinetic_core.cochem_pes_store import PESStore
     import h5py
 
@@ -204,7 +206,7 @@ def test_kinetic_01_pes_store_interface(tmp_path):
         assert f["/pes/grid"].attrs["provenance_tag"] == "[M]"
 
 
-def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard():
+def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard() -> None:
     from kinetic_core.mace_pre_opt import MACEPreOptimizer
 
     mace_opt = MACEPreOptimizer()
@@ -225,7 +227,7 @@ def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard():
     assert isinstance(e, float)
 
 
-def test_kinetic_03_dispatcher_v4_budgets_and_d1_d5_rules(tmp_path):
+def test_kinetic_03_dispatcher_v4_budgets_and_d1_d5_rules(tmp_path) -> None:
     from kinetic_core.dispatcher import KineticDispatcher, V4_WALLCLOCK_BUDGETS
     from kinetic_core.cochem_pes_store import PESStore
 
@@ -277,7 +279,7 @@ def test_kinetic_03_dispatcher_v4_budgets_and_d1_d5_rules(tmp_path):
     assert h5_path.exists()
 
 
-def test_kinetic_04_cineb_pes_store_streaming(tmp_path):
+def test_kinetic_04_cineb_pes_store_streaming(tmp_path) -> None:
     from kinetic_core.jax_cineb import JACXCINEBEngine
     from kinetic_core.cochem_pes_store import PESStore
 
@@ -287,7 +289,7 @@ def test_kinetic_04_cineb_pes_store_streaming(tmp_path):
         [[0.5, 0.0, 0.0]],
         [[1.0, 0.0, 0.0]]
     ])
-    def dummy_fn(img):
+    def dummy_fn(img) -> Any:
         return float(np.sum(img**2)), 2.0 * img
 
     h5_path = tmp_path / "cineb_pes.h5"
@@ -299,7 +301,7 @@ def test_kinetic_04_cineb_pes_store_streaming(tmp_path):
     assert len(grid["energies"]) > 0
 
 
-def test_kinetic_05_path_integral_bead_calculator():
+def test_kinetic_05_path_integral_bead_calculator() -> None:
     from kinetic_core.aimd_hoover import calculate_required_beads
 
     p_300k = calculate_required_beads(300.0, 3000.0)
@@ -312,7 +314,7 @@ def test_kinetic_05_path_integral_bead_calculator():
         calculate_required_beads(0.0, 3000.0)
 
 
-def test_kinetic_06_prohibit_classical_md_absolute_b0():
+def test_kinetic_06_prohibit_classical_md_absolute_b0() -> None:
     from kinetic_core.aimd_hoover import compute_rotational_constants_md
 
     coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
@@ -326,3 +328,13 @@ def test_kinetic_06_prohibit_classical_md_absolute_b0():
     assert len(res["rotational_constants_cm1"]) == 3
 
 
+def calculate_artifact_sha256(filepath: str | Path) -> str:
+    """Calculates SHA-256 hash of a computational artifact."""
+    p = Path(filepath)
+    if not p.exists():
+        raise FileNotFoundError(f"Artifact file not found: {filepath}")
+    hasher = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()

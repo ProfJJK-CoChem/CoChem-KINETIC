@@ -10,7 +10,7 @@ Pairwise Lennard-Jones formulas are strictly prohibited per Method Matrix §8A.2
 
 import logging
 import numpy as np
-from typing import Tuple, List, Optional
+from typing import Any, Tuple, List, Optional
 
 try:
     import ase
@@ -29,12 +29,12 @@ class MACEPreOptimizer:
 
     FLOAT32_NOISE_FLOOR: float = 1e-5
 
-    def __init__(self, model_name: str = "medium"):
+    def __init__(self, model_name: str = "medium") -> None:
         self.model_name = model_name
         self.logger = logging.getLogger("CoChem_KINETIC_MACE")
         self.calculator = self._init_calculator()
 
-    def _init_calculator(self):
+    def _init_calculator(self) -> Any:
         """Attempts to load MACE-OFF24m; falls back to MMFF94 / EMT if unavailable."""
         if not ASE_AVAILABLE:
             self.logger.warning("ASE not installed. MACE Pre-Optimizer using physical fallback.")
@@ -209,5 +209,4 @@ if __name__ == "__main__":
     syms = ["O", "H", "H"]
     coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
     rel_coords, e = pre_opt.pre_relax_geometry(syms, coords, max_steps=5)
-    print(f"MACE Pre-Optimizer test passed. Final E: {e:.4f} eV")
-
+    logger.info(f"MACE Pre-Optimizer test passed. Final E: {e:.4f} eV")

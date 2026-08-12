@@ -1,3 +1,6 @@
+import hashlib
+import logging
+logger = logging.getLogger(__name__)
 #!/usr/bin/env python3
 """
 CoChem-KINETIC - Stage 4: Interactive 3D HTML IRC Animation Generator
@@ -7,14 +10,14 @@ Renders 3D py3Dmol / Plotly HTML trajectory animations of IRC pathways for Jupyt
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 import numpy as np
 
 
 class IRCAnimationVisualizer:
     """Generates interactive 3D HTML animations of IRC pathways."""
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Optional[Path] = None) -> None:
         self.output_dir = output_dir or Path(os.environ.get("COCHEM_ARTIFACT_DIR", "."))
 
     def build_multi_xyz_string(self, symbols: List[str], trajectory_coords: np.ndarray) -> str:
@@ -79,4 +82,14 @@ if __name__ == "__main__":
         [[0.0,0.0,0.1], [0.0,0.8,-0.4], [0.0,-0.8,-0.4]]
     ])
     html = viz.generate_html_animation("Water_Inversion", syms, traj)
-    print("IRC Animation Visualizer test passed.")
+    logger.info("IRC Animation Visualizer test passed.")
+def calculate_artifact_sha256(filepath: str | Path) -> str:
+    """Calculates SHA-256 hash of a computational artifact."""
+    p = Path(filepath)
+    if not p.exists():
+        raise FileNotFoundError(f"Artifact file not found: {filepath}")
+    hasher = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()

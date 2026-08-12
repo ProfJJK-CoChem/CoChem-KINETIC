@@ -1,3 +1,4 @@
+import hashlib
 #!/usr/bin/env python3
 """
 CoChem-KINETIC - PES Store HDF5 Class Interface
@@ -35,7 +36,7 @@ class PESStore:
 
     _lock = threading.Lock()
 
-    def __init__(self, filename: Union[str, Path], mode: str = "a", provenance_tag: str = "[M]"):
+    def __init__(self, filename: Union[str, Path], mode: str = "a", provenance_tag: str = "[M]") -> None:
         self.filename = Path(filename)
         self.mode = mode
         self.provenance_tag = provenance_tag
@@ -47,7 +48,7 @@ class PESStore:
         self.filename.parent.mkdir(parents=True, exist_ok=True)
         self._init_groups()
 
-    def _init_groups(self):
+    def _init_groups(self) -> Any:
         """Initializes standard group structure and metadata attributes per §8C."""
         if self.mode != "r":
             with self._lock:
@@ -214,6 +215,16 @@ if __name__ == "__main__":
     store = PESStore("test_pes_store.h5")
     store.append_point(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]), energy=-76.2, gradient=np.zeros((2, 3)))
     grid = store.get_grid()
-    print(f"PESStore test passed. Grid shape: {grid['coordinates'].shape}")
+    logger.info(f"PESStore test passed. Grid shape: {grid['coordinates'].shape}")
     import os
     os.remove("test_pes_store.h5")
+def calculate_artifact_sha256(filepath: str | Path) -> str:
+    """Calculates SHA-256 hash of a computational artifact."""
+    p = Path(filepath)
+    if not p.exists():
+        raise FileNotFoundError(f"Artifact file not found: {filepath}")
+    hasher = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()

@@ -90,7 +90,7 @@ def compute_rotational_constants_md(
 class NoseHooverAIMDSampler:
     """Nose-Hoover NVT Ensemble Integrator and Thermal Sampler."""
 
-    def __init__(self, target_temp_k: float = 298.15, timestep_fs: float = 1.0, chain_length: int = 3):
+    def __init__(self, target_temp_k: float = 298.15, timestep_fs: float = 1.0, chain_length: int = 3) -> None:
         self.target_temp_k = target_temp_k
         self.default_dt_fs = timestep_fs
         self.chain_length = chain_length
@@ -199,11 +199,10 @@ if __name__ == "__main__":
     coords = np.array([[0.0,0.0,0.0], [0.0,0.0,1.2], [0.0,1.2,0.0]])
     masses = np.array([55.845, 15.999, 15.999])
     trajectory = sampler.sample_nvt_trajectory(syms, coords, masses, n_steps=10)
-    print(f"AIMD Sampler test passed. Trajectory frames: {len(trajectory)}")
+    logger.info(f"AIMD Sampler test passed. Trajectory frames: {len(trajectory)}")
 
     p_beads = calculate_required_beads(300.0, 3000.0)
-    print(f"Required beads at 300 K / 3000 cm-1: {p_beads}")
+    logger.info(f"Required beads at 300 K / 3000 cm-1: {p_beads}")
 
     rot_res = compute_rotational_constants_md(coords, masses, is_classical_md=True)
-    print(f"Classical MD B0 res: provenance={rot_res['provenance_tag']}, warning={rot_res['warning']}")
-
+    logger.info(f"Classical MD B0 res: provenance={rot_res['provenance_tag']}, warning={rot_res['warning']}")

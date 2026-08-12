@@ -1,3 +1,4 @@
+import hashlib
 #!/usr/bin/env python3
 """
 CoChem-KINETIC - Stage 1: Payload Ingestion Dispatcher & HDF5 State Writer
@@ -59,7 +60,7 @@ TIER_HIERARCHY: Dict[str, int] = {
 class KineticDispatcher:
     """CLI and API Dispatcher for CoChem-KINETIC workflows with v4 State-Chaining & PESStore support."""
 
-    def __init__(self, workspace_dir: Optional[Path] = None):
+    def __init__(self, workspace_dir: Optional[Path] = None) -> None:
         self.workspace_dir = Path(workspace_dir or os.environ.get("COCHEM_ARTIFACT_DIR", "."))
         self.logger = logging.getLogger("CoChem_KINETIC_Dispatcher")
 
@@ -146,7 +147,7 @@ class KineticDispatcher:
     def parse_payload_json(self, json_path: Path) -> Dict[str, Any]:
         """Parses input payload JSON file specifying reactants, products, and TS candidates."""
         with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = json.loads(f.read())
         self.logger.info(f"Ingested kinetic payload from {json_path.name}")
         return data
 
@@ -231,5 +232,15 @@ if __name__ == "__main__":
     sample_data = {"delta_g_barrier": 15.2, "k_eyring": 1.2e3, "temperature_k": 298.15}
     h5_file = Path("./cochem_state.h5")
     disp.write_state_hdf5(h5_file, sample_data, irc_energies=np.array([0.0, 15.2, 2.1]))
-    print("Kinetic Dispatcher test passed.")
+    logger.info("Kinetic Dispatcher test passed.")
 
+def calculate_artifact_sha256(filepath: str | Path) -> str:
+    """Calculates SHA-256 hash of a computational artifact."""
+    p = Path(filepath)
+    if not p.exists():
+        raise FileNotFoundError(f"Artifact file not found: {filepath}")
+    hasher = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()
