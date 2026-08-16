@@ -76,14 +76,17 @@ class PESStore:
         maxshape = (None, *item_shape)
         chunks = (chunk_size_dim0, *item_shape)
 
+        compression = "gzip"
+        compression_opts = 4
+            
         try:
             return group.create_dataset(
                 name,
                 shape=shape,
                 maxshape=maxshape,
                 chunks=chunks,
-                compression="gzip",
-                compression_opts=4,
+                compression=compression,
+                compression_opts=compression_opts,
                 shuffle=True,
                 fletcher32=True,
                 dtype=np.float64,
@@ -155,6 +158,8 @@ class PESStore:
                     new_shape_g = (curr_len_g + n_points, *grad_arr.shape[1:])
                     ds_grads.resize(new_shape_g)
                     ds_grads[curr_len_g:] = grad_arr
+                else:
+                    grad_arr = None
 
                 # Variances
                 if variance_batch is not None:
@@ -166,6 +171,8 @@ class PESStore:
                     new_shape_v = (curr_len_v + n_points, *var_arr.shape[1:])
                     ds_var.resize(new_shape_v)
                     ds_var[curr_len_v:] = var_arr
+                else:
+                    var_arr = None
 
         self.logger.debug(f"Appended {n_points} points to PESStore target group '{target_group_path}'.")
 

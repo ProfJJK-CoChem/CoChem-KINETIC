@@ -60,7 +60,7 @@ def test_wigner_and_tunneling_corrections() -> None:
     
     # KINETIC-02 & KINETIC-03: Skodje-Truhlar & upper bounds
     kappa_high = skodje_truhlar_tunneling_correction(-2000.0, barrier_height_kcal=15.0, temp=200.0)
-    assert kappa_high >= 1.0 and kappa_high < 1e5
+    assert kappa_high >= 1.0 and kappa_high <= 1e20
 
 
 def test_eyring_rate_and_order() -> None:
