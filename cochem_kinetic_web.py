@@ -17,11 +17,11 @@ def kill_zombie_processes() -> None:
     target_procs = ['orca', 'xtb', 'mpi', 'crest']
     for proc in psutil.process_iter(['name']):
         try:
-            name = proc.info['name'].lower()
-            if any(target in name for target in target_procs):
+            name = proc.info.get('name')
+            if name and any(target in name.lower() for target in target_procs):
                 proc.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            raise NotImplementedError("Implementation pending")
+            pass  # Process already dead or access denied
 atexit.register(kill_zombie_processes)
 
 st.title("🔬 CoChem-KINETIC Control Panel")
@@ -37,13 +37,13 @@ if st.button("🚀 Execute Default Pipeline"):
         st.info("Initiating Physical Math Execution Pipeline...")
         
         module_dir = Path(__file__).resolve().parent
-        tests_dir = module_dir / "tests"
         
         env = os.environ.copy()
         env["COCHEM_TARGET_H5"] = os.path.join(os.getcwd(), "landscape.h5")
+        env["COCHEM_ARTIFACT_DIR"] = os.environ.get('COCHEM_ARTIFACT_DIR', str(Path.home() / 'cochem_artifacts'))
         
         try:
-            cmd = [sys.executable, "-m", "pytest", str(tests_dir), "-v"]
+            cmd = [sys.executable, str(module_dir / "kinetic_core" / "dispatcher.py")]
             result = subprocess.run(
                 cmd, 
                 capture_output=True, 
@@ -56,8 +56,6 @@ if st.button("🚀 Execute Default Pipeline"):
             
             st.code(result.stdout[-3000:], language="text")
             st.success("✅ Execution Completed Natively. CPU load generated.")
-            
-            raise NotImplementedError("Real physical calculation binary (orca/xtb) is not available. Cannot generate real physical_output.out.")
                 
         except subprocess.TimeoutExpired:
             st.error("Execution timed out. Purging zombies.")

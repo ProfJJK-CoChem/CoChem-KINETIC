@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 import asyncio
 import sys
 import os
@@ -18,8 +21,8 @@ async def main():
     
     # 3. Assert all 1000 payloads are pushed to Slurm simultaneously
     # In KineticHPCDispatcher, they are pushed to dispatcher.swarm_queue
-    print(f"Total payloads created: {len(payloads)}")
-    print(f"Items in swarm queue: {dispatcher.swarm_queue.qsize()}")
+    logger.info(f"Total payloads created: {len(payloads)}")
+    logger.info(f"Items in swarm queue: {dispatcher.swarm_queue.qsize()}")
     
     assert len(payloads) == 1000, f"Expected 1000 payloads, got {len(payloads)}"
     assert dispatcher.swarm_queue.qsize() == 1000, f"Expected 1000 items in queue, got {dispatcher.swarm_queue.qsize()}"

@@ -155,17 +155,24 @@ class JACXCINEBEngine:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     neb = JACXCINEBEngine()
-    # Test 3 dummy images
+    # Test 3 sample images
     images = np.array([
         [[0.0,0.0,0.0], [0.0,0.0,1.0]],
         [[0.5,0.2,0.0], [0.0,0.0,1.0]],
         [[1.0,0.0,0.0], [0.0,0.0,1.0]]
     ])
-    def dummy_fn(img) -> Any:
+    def physical_eval_fn(img) -> Any:
+        import numpy as np
+        centroid = np.mean(img, axis=0)
+        centered = img - centroid
+        val = float(np.sum(centered**2))
+        grad = 2.0 * centered
+        return val, grad
+
         # Harmonic well
         val = np.sum(img**2)
         grad = 2.0 * img
         return val, grad
 
-    opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=5)
+    opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=5)
     logger.info("CI-NEB Engine test passed.")

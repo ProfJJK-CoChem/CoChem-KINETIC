@@ -1,7 +1,7 @@
 import warnings
 
 class CollisionCrossSectionWarning(Warning):
-    raise NotImplementedError("Implementation pending")
+    pass
 def _get_pubchem_empirical_limits(gas_name: str) -> tuple[float, float]:
     """
     Simulates fetching empirical Lennard-Jones parameters from PubChem database.

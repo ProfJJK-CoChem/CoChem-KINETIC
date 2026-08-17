@@ -13,23 +13,33 @@ import logging
 import numpy as np
 from typing import Optional, Dict, Tuple, List
 
+logger = logging.getLogger(__name__)
+
 
 class MultireferenceDiagnosticError(Exception):
     """Raised when T1 or D1 multireference diagnostics exceed single-reference validity thresholds."""
 
 
-def wigner_correction(imaginary_freq: float, temp: float = 298.15, force_eckart: bool = False, barrier_height_kcal: float = 10.0) -> float:
+def calculate_wigner_correction(
+    imag_freq: Optional[float] = None,
+    imaginary_freq: Optional[float] = None,
+    temp: float = 298.15,
+    force_eckart: bool = False,
+    barrier_height_kcal: float = 10.0
+) -> float:
     """
     Computes the Wigner tunneling correction factor kappa.
     Correctly handles negative imaginary frequencies and caps unphysical quadratic growth.
     """
+    freq = imag_freq if imag_freq is not None else (imaginary_freq if imaginary_freq is not None else 0.0)
     if temp < 50.0:
+        logger.warning(f"Cryogenic temperature ({temp:.1f} K < 50 K) detected. Forcing Eckart fallback.")
         force_eckart = True
         
     if force_eckart:
-        return skodje_truhlar_tunneling_correction(imaginary_freq, barrier_height_kcal=barrier_height_kcal, temp=temp)
+        return skodje_truhlar_tunneling_correction(freq, barrier_height_kcal=barrier_height_kcal, temp=temp)
 
-    freq_abs = abs(imaginary_freq)
+    freq_abs = abs(freq)
     if freq_abs < 1e-6:
         return 1.0
         
@@ -43,6 +53,9 @@ def wigner_correction(imaginary_freq: float, temp: float = 298.15, force_eckart:
     # Standard Wigner correction factor: 1 + (u^2)/24 + (u^4)/1920
     kappa = 1.0 + (u**2) / 24.0 + (u**4) / 1920.0
     return float(min(max(1.0, kappa), 1e4))
+
+
+wigner_correction = calculate_wigner_correction
 
 
 def skodje_truhlar_tunneling_correction(imaginary_freq: float, barrier_height_kcal: float = 10.0, temp: float = 298.15) -> float:

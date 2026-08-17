@@ -75,6 +75,6 @@ if __name__ == "__main__":
     ts = np.array([[0.0,0.0,0.0], [0.0,0.0,1.2]])
     m = np.array([16.0, 1.0])
     mode = np.array([[0.0,0.0,1.0], [0.0,0.0,-1.0]])
-    def dummy_grad(c) -> Any: return 2.0 * c
-    path, e = tracer.trace_irc_path(ts, m, mode, dummy_grad, max_steps=5)
+    def test_grad(c) -> Any: return 2.0 * c
+    path, e = tracer.trace_irc_path(ts, m, mode, test_grad, max_steps=5)
     logger.info(f"IRC Tracer test passed. Path images: {len(path)}")

@@ -2,7 +2,7 @@ import warnings
 import math
 
 class CollisionParameterWarning(UserWarning):
-    raise NotImplementedError("Implementation pending")
+    pass
 class MasterEquation:
     def __init__(self, bath_gas: str, delta_e_down: float):
         self.bath_gas = bath_gas

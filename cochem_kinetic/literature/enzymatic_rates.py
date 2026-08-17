@@ -5,7 +5,7 @@ import urllib.request
 from typing import Dict, Any
 
 class DiffusionLimitWarning(Warning):
-    raise NotImplementedError("Implementation pending")
+    pass
 class EnzymaticRateBenchmarker:
     def __init__(self, enzyme_name: str = "GenericEnzyme"):
         self.enzyme_name = enzyme_name

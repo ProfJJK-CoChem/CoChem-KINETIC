@@ -46,17 +46,23 @@ def calculate_eckart_tunneling(imag_freq: float, temp: float, V_f: float = 10.0,
         b = alpha * math.sqrt(E - A_diff) if E - A_diff > 0 else 0.0
         c2 = alpha**2 * B - math.pi**2
         
-        cosh_ab = math.cosh(a + b)
-        cosh_amb = math.cosh(a - b)
-        
-        if c2 > 0:
-            c_val = math.sqrt(c2)
-            denom = cosh_ab + math.cosh(c_val)
-        else:
-            c_val = math.sqrt(-c2)
-            denom = cosh_ab + math.cos(c_val)
+        if a + b > 50.0:
+            return float(max(0.0, min(1.0, 1.0 - math.exp(-2.0 * b))))
+
+        try:
+            cosh_ab = math.cosh(a + b)
+            cosh_amb = math.cosh(a - b)
             
-        return (cosh_ab - cosh_amb) / denom
+            if c2 > 0:
+                c_val = math.sqrt(c2)
+                denom = cosh_ab + math.cosh(c_val)
+            else:
+                c_val = math.sqrt(-c2)
+                denom = cosh_ab + math.cos(c_val)
+                
+            return (cosh_ab - cosh_amb) / denom
+        except OverflowError:
+            return float(max(0.0, min(1.0, 1.0 - math.exp(-2.0 * b))))
 
     integral, _ = quad(lambda E: P_E(E) * math.exp(-E / kT), 0, np.inf, limit=200)
     kappa = integral * math.exp(V_f / kT) / kT

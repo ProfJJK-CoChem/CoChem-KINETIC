@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 import sys
 import os
 
@@ -7,7 +10,7 @@ sys.path.insert(0, os.path.abspath("."))
 from kinetic_core.engine.master_equation_limits import MasterEquationSolver
 
 def test_master_equation_sabotage():
-    print("--- Starting 2D E/J Master Equation Sabotage Test ---")
+    logger.info("--- Starting 2D E/J Master Equation Sabotage Test ---")
     solver = MasterEquationSolver(delta_g=15.0, temp=298.15)
     
     # Grid points for T from 100K to 2000K, P from 0.01 Torr to 100 atm
@@ -18,11 +21,11 @@ def test_master_equation_sabotage():
     try:
         solver.evaluate_2d_ej(temp_range, press_range, N=10000)
     except PermissionError as e:
-        print(f"Exception caught successfully: {e}")
-        print("--- Test Passed! Execution halted due to Dry-Run projection. ---")
+        logger.info(f"Exception caught successfully: {e}")
+        logger.info("--- Test Passed! Execution halted due to Dry-Run projection. ---")
         return
         
-    print("--- Test Failed! Execution proceeded without Dry-Run authorization! ---")
+    logger.info("--- Test Failed! Execution proceeded without Dry-Run authorization! ---")
 
 if __name__ == "__main__":
     test_master_equation_sabotage()

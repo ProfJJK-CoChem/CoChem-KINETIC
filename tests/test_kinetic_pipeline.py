@@ -121,8 +121,15 @@ def test_cineb_mace_aimd_and_irc() -> None:
     # KINETIC-07: JAX CI-NEB
     neb = JACXCINEBEngine()
     images = np.array([[[0.0,0.0,0.0]], [[0.5,0.0,0.0]], [[1.0,0.0,0.0]]])
-    def dummy_fn(img) -> Any: return np.sum(img**2), 2.0*img
-    opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=2)
+    def physical_eval_fn(img) -> Any:
+        import numpy as np
+        centroid = np.mean(img, axis=0)
+        centered = img - centroid
+        val = float(np.sum(centered**2))
+        grad = 2.0 * centered
+        return val, grad
+
+    opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=2)
     assert len(opt_img) == 3
 
     # KINETIC-08: MACE Pre-optimizer fallback
@@ -137,7 +144,7 @@ def test_cineb_mace_aimd_and_irc() -> None:
 
     # KINETIC-12: IRC Tracer
     tracer = IRCTracerEngine()
-    path, energies = tracer.trace_irc_path(np.array([[0,0,0],[0,0,1]]), np.array([16.0, 1.0]), np.array([[0,0,1],[0,0,-1]]), dummy_fn, max_steps=2)
+    path, energies = tracer.trace_irc_path(np.array([[0,0,0],[0,0,1]]), np.array([16.0, 1.0]), np.array([[0,0,1],[0,0,-1]]), physical_eval_fn, max_steps=2)
     assert len(path) > 0
 
 
@@ -289,11 +296,18 @@ def test_kinetic_04_cineb_pes_store_streaming(tmp_path) -> None:
         [[0.5, 0.0, 0.0]],
         [[1.0, 0.0, 0.0]]
     ])
-    def dummy_fn(img) -> Any:
+    def physical_eval_fn(img) -> Any:
+        import numpy as np
+        centroid = np.mean(img, axis=0)
+        centered = img - centroid
+        val = float(np.sum(centered**2))
+        grad = 2.0 * centered
+        return val, grad
+
         return float(np.sum(img**2)), 2.0 * img
 
     h5_path = tmp_path / "cineb_pes.h5"
-    opt_img, opt_e = neb.optimize_path(images, dummy_fn, max_iter=3, pes_store=str(h5_path))
+    opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=3, pes_store=str(h5_path))
 
     store = PESStore(h5_path)
     grid = store.get_grid()

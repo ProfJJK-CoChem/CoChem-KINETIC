@@ -2,7 +2,7 @@ import warnings
 import math
 
 class NonAdiabaticOverrideWarning(Warning):
-    raise NotImplementedError("Implementation pending")
+    pass
 class NonAdiabaticReaction:
     def __init__(self, reaction_type: str, kappa_NA: float):
         self.reaction_type = reaction_type

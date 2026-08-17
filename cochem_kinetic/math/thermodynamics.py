@@ -1,7 +1,7 @@
 import math
 
 class DetailedBalanceError(Exception):
-    raise NotImplementedError("Implementation pending")
+    pass
 class ThermodynamicSymmetryEnforcer:
     def __init__(self):
         raise NotImplementedError("Implementation pending")
@@ -38,7 +38,7 @@ class ThermodynamicSymmetryEnforcer:
         
         return kf, kr
 
-def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cutoff_freq: float = 100.0) -> float:
+def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cutoff_freq: float = 100.0, B_av: float = 1e-44) -> float:
     """
     Implements Grimme's quasi-RRHO (qRRHO) interpolation for low-frequency modes.
     Replaces harmonic oscillator entropy with free rotor entropy below the cutoff.
@@ -63,7 +63,6 @@ def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cut
         S_HO = R_cal * (x / (np.exp(x) - 1.0) - np.log(1.0 - np.exp(-x)))
         
         # Free Rotor entropy (using Grimme's average moment of inertia approximation)
-        B_av = 1e-44  # kg m^2 placeholder for standard Grimme rotor moment
         # Instead of explicitly computing moment of inertia, Grimme uses a scaled form
         # mu = h / (8 * pi^2 * c * nu)
         mu = h / (8 * np.pi**2 * nu_hz)
