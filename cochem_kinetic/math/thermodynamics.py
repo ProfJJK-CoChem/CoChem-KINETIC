@@ -1,11 +1,14 @@
 import math
+from typing import Any
 
 class DetailedBalanceError(Exception):
     pass
+
 class ThermodynamicSymmetryEnforcer:
-    def __init__(self):
-        raise NotImplementedError("Implementation pending")
-    def enforce_detailed_balance(self, forward_params: dict, reverse_params: dict) -> None:
+    def __init__(self) -> None:
+        pass
+
+    def enforce_detailed_balance(self, forward_params: dict[str, Any], reverse_params: dict[str, Any]) -> None:
         """
         Enforces the principle of detailed balance by checking the symmetry of the partition function
         methodologies (e.g. Rigid-Rotor Harmonic Oscillator vs Hindered Rotor) before rate calculation.
@@ -21,10 +24,13 @@ class ThermodynamicSymmetryEnforcer:
                 "This violates microscopic reversibility and detailed balance."
             )
             
-    def compute_rates_with_symmetry_check(self, dg_forward: float, dg_reverse: float, forward_params: dict, reverse_params: dict, temp: float = 298.15) -> tuple[float, float]:
+    def compute_rates_with_symmetry_check(self, dg_forward: float, dg_reverse: float, forward_params: dict[str, Any], reverse_params: dict[str, Any], temp: float = 298.15) -> tuple[float, float]:
         """
         Calculates rates after enforcing thermodynamic symmetry.
         """
+        if temp <= 0.0:
+            raise ValueError("Temperature must be greater than 0 K")
+            
         self.enforce_detailed_balance(forward_params, reverse_params)
         
         h = 6.62607015e-34
@@ -33,9 +39,14 @@ class ThermodynamicSymmetryEnforcer:
         
         prefactor = (kB * temp) / h
         
-        kf = prefactor * math.exp(-dg_forward / (R * temp))
-        kr = prefactor * math.exp(-dg_reverse / (R * temp))
-        
+        try:
+            kf = prefactor * math.exp(-dg_forward / (R * temp))
+            kr = prefactor * math.exp(-dg_reverse / (R * temp))
+        except OverflowError as e:
+            raise OverflowError("Delta G value resulted in math overflow during exponential calculation") from e
+        except ZeroDivisionError as e:
+            raise ZeroDivisionError("Zero division error during exponential calculation, temp might be too small") from e
+            
         return kf, kr
 
 def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cutoff_freq: float = 100.0, B_av: float = 1e-44) -> float:
@@ -44,8 +55,9 @@ def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cut
     Replaces harmonic oscillator entropy with free rotor entropy below the cutoff.
     Returns entropy in cal/(mol*K).
     """
-    import numpy as np
-    
+    if temp <= 0.0:
+        raise ValueError("Temperature must be greater than 0 K")
+        
     R_cal = 1.987204258  # cal/(mol*K)
     h = 6.62607015e-34   # J s
     c = 2.99792458e10    # cm/s
@@ -60,18 +72,40 @@ def grimes_qrrho_entropy(frequencies_cm1: list[float], temp: float = 298.15, cut
         # Harmonic Oscillator entropy
         nu_hz = nu * c
         x = (h * nu_hz) / (kB * temp)
-        S_HO = R_cal * (x / (np.exp(x) - 1.0) - np.log(1.0 - np.exp(-x)))
+        
+        try:
+            exp_x = math.exp(x)
+            exp_minus_x = math.exp(-x)
+            if exp_x == 1.0 or exp_minus_x == 1.0:
+                # Taylor expansion approximation for very small x
+                S_HO = R_cal * (1.0 - math.log(x))
+            else:
+                S_HO = R_cal * (x / (exp_x - 1.0) - math.log(1.0 - exp_minus_x))
+        except OverflowError:
+            S_HO = 0.0
+        except ZeroDivisionError as e:
+            raise ZeroDivisionError(f"Zero division in HO entropy calculation for frequency {nu}") from e
+        except ValueError as e:
+            raise ValueError(f"Math domain error in HO entropy for frequency {nu}") from e
         
         # Free Rotor entropy (using Grimme's average moment of inertia approximation)
-        # Instead of explicitly computing moment of inertia, Grimme uses a scaled form
-        # mu = h / (8 * pi^2 * c * nu)
-        mu = h / (8 * np.pi**2 * nu_hz)
-        mu_prime = (mu * B_av) / (mu + B_av)
-        
-        S_rotor = R_cal * (0.5 + np.log(np.sqrt((8 * np.pi**3 * kB * temp * mu_prime) / (h**2))))
+        try:
+            mu = h / (8 * math.pi**2 * nu_hz)
+            mu_prime = (mu * B_av) / (mu + B_av)
+            
+            S_rotor = R_cal * (0.5 + math.log(math.sqrt((8 * math.pi**3 * kB * temp * mu_prime) / (h**2))))
+        except ZeroDivisionError as e:
+            raise ZeroDivisionError(f"Zero division computing free rotor entropy for frequency {nu}") from e
+        except ValueError as e:
+            raise ValueError(f"Math domain error computing free rotor entropy for frequency {nu}") from e
         
         # Damping function
-        w = 1.0 / (1.0 + (cutoff_freq / nu)**4)
+        try:
+            w = 1.0 / (1.0 + (cutoff_freq / nu)**4)
+        except OverflowError:
+            w = 0.0
+        except ZeroDivisionError as e:
+            raise ZeroDivisionError(f"Zero division computing damping function for frequency {nu}") from e
         
         # Interpolated entropy
         S_total += w * S_HO + (1.0 - w) * S_rotor

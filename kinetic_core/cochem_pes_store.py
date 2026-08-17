@@ -1,5 +1,5 @@
-import hashlib
 #!/usr/bin/env python3
+import hashlib
 """
 CoChem-KINETIC - PES Store HDF5 Class Interface
 ------------------------------------------------
@@ -17,7 +17,7 @@ under /pes/grid, /pes/fit, and /pes/uncertainty with:
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Any
 import numpy as np
 
 try:
@@ -36,7 +36,7 @@ class PESStore:
 
     _lock = threading.Lock()
 
-    def __init__(self, filename: Union[str, Path], mode: str = "a", provenance_tag: str = "[M]") -> None:
+    def __init__(self, filename: str | Path, mode: str = "a", provenance_tag: str = "[M]") -> None:
         self.filename = Path(filename)
         self.mode = mode
         self.provenance_tag = provenance_tag
@@ -48,7 +48,7 @@ class PESStore:
         self.filename.parent.mkdir(parents=True, exist_ok=True)
         self._init_groups()
 
-    def _init_groups(self) -> Any:
+    def _init_groups(self) -> None:
         """Initializes standard group structure and metadata attributes per §8C."""
         if self.mode != "r":
             with self._lock:
@@ -100,11 +100,11 @@ class PESStore:
         self,
         coords_batch: np.ndarray,
         energy_batch: np.ndarray,
-        gradient_batch: Optional[np.ndarray] = None,
-        variance_batch: Optional[np.ndarray] = None,
+        gradient_batch: np.ndarray | None = None,
+        variance_batch: np.ndarray | None = None,
         group: str = "grid",
-        metadata: Optional[Dict[str, Any]] = None,
-    ):
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """
         Appends a batch of points to the specified PES group ('grid', 'fit', or 'uncertainty').
         """
@@ -130,7 +130,7 @@ class PESStore:
                     for k, v in metadata.items():
                         try:
                             grp.attrs[k] = v
-                        except Exception:
+                        except (TypeError, ValueError):
                             grp.attrs[k] = str(v)
 
                 # Coordinates
@@ -180,11 +180,11 @@ class PESStore:
         self,
         coords: np.ndarray,
         energy: float,
-        gradient: Optional[np.ndarray] = None,
-        variance: Optional[float] = None,
+        gradient: np.ndarray | None = None,
+        variance: float | None = None,
         group: str = "grid",
-        metadata: Optional[Dict[str, Any]] = None,
-    ):
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Appends a single PES data point."""
         c_batch = coords[np.newaxis, ...] if coords.ndim > 0 else coords
         e_batch = np.array([energy], dtype=np.float64)
@@ -192,19 +192,19 @@ class PESStore:
         v_batch = np.array([variance], dtype=np.float64) if variance is not None else None
         self.append_batch(c_batch, e_batch, g_batch, v_batch, group=group, metadata=metadata)
 
-    def get_grid(self) -> Dict[str, np.ndarray]:
+    def get_grid(self) -> dict[str, np.ndarray]:
         """Retrieves grid datasets from /pes/grid."""
         return self._read_group("pes/grid")
 
-    def get_fit(self) -> Dict[str, np.ndarray]:
+    def get_fit(self) -> dict[str, np.ndarray]:
         """Retrieves fitted datasets from /pes/fit."""
         return self._read_group("pes/fit")
 
-    def get_uncertainty(self) -> Dict[str, np.ndarray]:
+    def get_uncertainty(self) -> dict[str, np.ndarray]:
         """Retrieves epistemic uncertainty datasets from /pes/uncertainty."""
         return self._read_group("pes/uncertainty")
 
-    def _read_group(self, group_path: str) -> Dict[str, np.ndarray]:
+    def _read_group(self, group_path: str) -> dict[str, np.ndarray]:
         """Reads all datasets in an HDF5 group into a dictionary of NumPy arrays."""
         result = {}
         with self._lock:
@@ -217,14 +217,7 @@ class PESStore:
         return result
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    store = PESStore("test_pes_store.h5")
-    store.append_point(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]), energy=-76.2, gradient=np.zeros((2, 3)))
-    grid = store.get_grid()
-    logger.info(f"PESStore test passed. Grid shape: {grid['coordinates'].shape}")
-    import os
-    os.remove("test_pes_store.h5")
+
 def calculate_artifact_sha256(filepath: str | Path) -> str:
     """Calculates SHA-256 hash of a computational artifact."""
     p = Path(filepath)

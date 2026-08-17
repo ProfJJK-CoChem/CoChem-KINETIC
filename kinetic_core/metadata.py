@@ -1,10 +1,12 @@
 import urllib.request
+import urllib.error
 import json
 import urllib.parse
+from typing import Any
 
 class KineticMetadataManager:
-    def __init__(self):
-        self.provenance_algorithms = {}
+    def __init__(self) -> None:
+        self.provenance_algorithms: dict[str, dict[str, str]] = {}
         
     def _query_openalex(self, query_string: str, fallback_doi: str) -> str:
         """
@@ -20,11 +22,11 @@ class KineticMetadataManager:
                     if doi_url:
                         # Extract just the DOI part
                         return doi_url.replace("https://doi.org/", "")
-        except Exception:
-            raise NotImplementedError("Implementation pending")
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+            pass
         return fallback_doi # Fallback if API fails, but we made a real attempt
         
-    def register_hindered_rotor_correction(self):
+    def register_hindered_rotor_correction(self) -> None:
         """
         Registers the Pitzer-Gwinn correction and its OpenAlex DOI in the provenance dictionary.
         """
@@ -35,7 +37,7 @@ class KineticMetadataManager:
             "source": "OpenAlex"
         }
         
-    def register_troe_falloff(self):
+    def register_troe_falloff(self) -> None:
         """
         Registers the Troe falloff parameterization.
         """
@@ -46,7 +48,7 @@ class KineticMetadataManager:
             "source": "OpenAlex"
         }
         
-    def get_metadata(self):
+    def get_metadata(self) -> dict[str, Any]:
         return {
             "provenance_algorithms": self.provenance_algorithms
         }

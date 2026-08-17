@@ -2,25 +2,34 @@ import numpy as np
 import warnings
 
 class RRKMSolver:
-    def __init__(self, frequencies: list = None):
+    def __init__(self, frequencies: list[float] | None = None) -> None:
         if frequencies is None:
-            self.frequencies = [1000.0, 1500.0, 3000.0] # cm^-1
+            self.frequencies: list[float] = []
         else:
-            self.frequencies = frequencies
+            self.frequencies: list[float] = frequencies
             
-        self.dE = 10.0
-        self.grain_array = []
+        self.dE: float = 10.0
+        self.grain_array: np.ndarray = np.array([])
+        self.rho_E: np.ndarray = np.array([])
         
     def _beyer_swinehart_exact_counting(self, max_energy: float, dE: float) -> np.ndarray:
         """
         Calculates the density of states rho(E) using the exact Beyer-Swinehart counting algorithm.
         """
-        n_grains = int(max_energy / dE) + 1
+        try:
+            n_grains = int(max_energy / dE) + 1
+        except ZeroDivisionError:
+            raise ValueError("Energy grain size dE cannot be zero.")
+            
         rho = np.zeros(n_grains)
         rho[0] = 1.0
         
         for freq in self.frequencies:
-            freq_grains = int(freq / dE)
+            try:
+                freq_grains = int(freq / dE)
+            except ZeroDivisionError:
+                continue
+                
             if freq_grains == 0:
                 continue
             for i in range(freq_grains, n_grains):
@@ -28,12 +37,15 @@ class RRKMSolver:
                 
         return rho
         
-    def compute_kE(self, energy: float, dE: float):
+    def compute_kE(self, energy: float, dE: float) -> float:
         """
         Computes the microcanonical rate constant k(E) ensuring strict Nyquist limits for dE.
         """
-        min_freq = min(self.frequencies)
-        
+        try:
+            min_freq = min(self.frequencies)
+        except ValueError:
+            raise ValueError("Cannot compute k(E) without vibrational frequencies.")
+            
         # Nyquist-Shannon sampling theorem equivalent for frequency resolution
         nyquist_limit = min_freq / 2.0
         
@@ -55,5 +67,11 @@ class RRKMSolver:
         # Physical calculation for full RRKM rate evaluation (W(E)/h*rho(E))
         # Since we only have rho(E) right now, we calculate a baseline microcanonical rate
         h_planck = 3.33564e-11 # cm^-1 s
-        rate = 1.0 / (h_planck * np.sum(self.rho_E)) if np.sum(self.rho_E) > 0 else 0.0
-        return rate
+        rho_sum = np.sum(self.rho_E)
+        
+        try:
+            rate = 1.0 / (h_planck * rho_sum) if rho_sum > 0 else 0.0
+        except ZeroDivisionError:
+            rate = 0.0
+            
+        return float(rate)

@@ -2,9 +2,10 @@ import json
 import numpy as np
 
 class WebMCPArrheniusPlotter:
-    def __init__(self):
-        raise NotImplementedError("Implementation pending")
-    def generate_plot_json(self, T_array: list, k_array: list) -> str:
+    def __init__(self) -> None:
+        pass
+
+    def generate_plot_json(self, T_array: list[float], k_array: list[float]) -> str:
         """
         Generates a JSON payload containing standard Plotly configuration for an Arrhenius plot.
         Ensures logarithmic scaling and correct inverse temperature rendering.
@@ -12,7 +13,12 @@ class WebMCPArrheniusPlotter:
         # We assume the UI layer expects Plotly JSON schema format.
         
         # Convert T_array to 1000/T
-        inverse_t = [1000.0 / t for t in T_array]
+        try:
+            inverse_t = [1000.0 / float(t) for t in T_array]
+        except ZeroDivisionError as e:
+            raise ValueError("Temperature array cannot contain zero") from e
+        except (TypeError, ValueError) as e:
+            raise TypeError("Temperature array must contain numeric values") from e
         
         plot_data = {
             "data": [
@@ -36,4 +42,7 @@ class WebMCPArrheniusPlotter:
             }
         }
         
-        return json.dumps(plot_data)
+        try:
+            return json.dumps(plot_data)
+        except TypeError as e:
+            raise ValueError("Failed to serialize plot data to JSON") from e

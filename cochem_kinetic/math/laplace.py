@@ -17,8 +17,12 @@ def _naive_inverse_laplace(T_array: np.ndarray, k_T_array: np.ndarray) -> tuple[
     
     # Naive inversion: k_E = K^{-1} k_T
     # Using pseudoinverse for stability but still unregularized
-    K_inv = np.linalg.pinv(K)
-    k_E = K_inv @ k_T_array
+    try:
+        K_inv = np.linalg.pinv(K)
+        k_E = K_inv @ k_T_array
+    except np.linalg.LinAlgError as e:
+        warnings.warn(f"Pseudoinverse computation failed: {e}")
+        k_E = np.full(len(T_array), -1.0)
     
     return E_array, k_E
 
@@ -39,11 +43,14 @@ def _tikhonov_nnls_inverse_laplace(T_array: np.ndarray, k_T_array: np.ndarray, a
     y_aug = np.concatenate((k_T_array, np.zeros(len(E_array))))
     
     # Solve with NNLS to strictly enforce non-negativity
-    k_E, _ = nnls(K_aug, y_aug)
+    try:
+        k_E, _ = nnls(K_aug, y_aug)
+    except RuntimeError as e:
+        raise RuntimeError(f"NNLS failed to converge: {e}") from e
     
     return E_array, k_E
 
-def inverse_laplace_transform(T_array: np.ndarray, k_T_array: np.ndarray, regularization: str = None) -> tuple[np.ndarray, np.ndarray]:
+def inverse_laplace_transform(T_array: np.ndarray, k_T_array: np.ndarray, regularization: str | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
     Computes the microcanonical rate constant k(E) from the thermal rate constant k(T)
     using the Inverse Laplace Transform.

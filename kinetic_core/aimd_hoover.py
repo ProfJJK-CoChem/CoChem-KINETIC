@@ -11,7 +11,7 @@ rotational constant B0 prohibition guard (§11.1, §13.4).
 
 import logging
 import numpy as np
-from typing import Tuple, List, Dict, Optional, Callable, Any
+from typing import Callable, Any
 
 
 def calculate_required_beads(temp_k: float, w_max_cm1: float) -> int:
@@ -32,7 +32,7 @@ def compute_rotational_constants_md(
     geometry: np.ndarray,
     masses: np.ndarray,
     is_classical_md: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Computes rotational constants (cm⁻¹) from geometry and atomic masses.
     Prohibits classical MD for absolute B_0 claims (§11.1, §13.4).
@@ -63,7 +63,11 @@ def compute_rotational_constants_md(
     inertia_tensor[2, 1] = inertia_tensor[1, 2]
 
     # Principal moments of inertia (sorted ascending)
-    evals = np.linalg.eigvalsh(inertia_tensor)
+    try:
+        evals = np.linalg.eigvalsh(inertia_tensor)
+    except np.linalg.LinAlgError as e:
+        logger.error(f"Failed to diagonalize inertia tensor: {e}")
+        raise ValueError(f"Invalid inertia tensor for geometry: {e}") from e
     evals = np.sort(evals)
 
     # Conversion factor h / (8 * pi^2 * c * amu * A^2) = 16.857629 cm⁻¹
@@ -96,7 +100,7 @@ class NoseHooverAIMDSampler:
         self.chain_length = chain_length
         self.logger = logging.getLogger("CoChem_KINETIC_AIMD")
 
-    def _determine_timestep(self, symbols: List[str]) -> float:
+    def _determine_timestep(self, symbols: list[str]) -> float:
         """
         Reduces timestep to 0.5 fs if transition metals (Z > 20) are present in the species.
         """
@@ -111,53 +115,38 @@ class NoseHooverAIMDSampler:
             return 0.5
         return self.default_dt_fs
 
-    def sample_nvt_trajectory(self, symbols: List[str], initial_coords: np.ndarray, masses: np.ndarray, n_steps: int = 100, force_fn: Optional[Callable] = None) -> List[np.ndarray]:
+    def sample_nvt_trajectory(self, symbols: list[str], initial_coords: np.ndarray, masses: np.ndarray, n_steps: int = 100, force_fn: Callable | None = None) -> list[np.ndarray]:
         """
         Executes NVT Nose-Hoover trajectory sampling.
         Returns list of sampled coordinate frames.
         """
+        if force_fn is None:
+            raise ValueError("force_fn must be provided for AIMD sampling.")
+
         dt_fs = self._determine_timestep(symbols)
         dt_s = dt_fs * 1e-15
         n_atoms = len(symbols)
 
-        # Maxwell-Boltzmann initial velocities (deterministic low-discrepancy Halton Box-Muller)
+        # Maxwell-Boltzmann initial velocities
         kB = 1.380649e-23
         std_v = np.sqrt(kB * self.target_temp_k / (masses * 1.660539e-27))[:, np.newaxis]
         
-        primes = [2, 3, 5, 7, 11, 13]
-        u_vals = []
-        for idx in range(n_atoms * 3 * 2):
-            base = primes[idx % len(primes)]
-            f = 1.0
-            r = 0.0
-            i_val = idx + 1
-            while i_val > 0:
-                f /= base
-                r += f * (i_val % base)
-                i_val //= base
-            u_vals.append(max(r, 1e-6))
-
-        raw_vels = []
-        for a_idx in range(n_atoms):
-            v_atom = []
-            for dim in range(3):
-                u1 = u_vals[(a_idx * 3 + dim) * 2]
-                u2 = u_vals[(a_idx * 3 + dim) * 2 + 1]
-                z = np.sqrt(-2.0 * np.log(u1)) * np.cos(2.0 * np.pi * u2)
-                v_atom.append(z * std_v[a_idx, 0])
-            raw_vels.append(v_atom)
-        velocities = np.array(raw_vels) * 1e-10 # m/s to A/s
-
+        rng = np.random.default_rng()
+        velocities = rng.standard_normal((n_atoms, 3)) * std_v
+        
         # Remove Center of Mass momentum
         m_total = np.sum(masses)
         v_com = np.sum(velocities * masses[:, np.newaxis], axis=0) / m_total
         velocities -= v_com
 
         # Scale kinetic energy to target temperature
-        ke_current = 0.5 * np.sum(masses[:, np.newaxis] * 1.660539e-27 * (velocities * 1e10)**2)
+        ke_current = 0.5 * np.sum(masses[:, np.newaxis] * 1.660539e-27 * velocities**2)
         target_ke = 1.5 * n_atoms * kB * self.target_temp_k
         if ke_current > 0:
             velocities *= np.sqrt(target_ke / ke_current)
+
+        # Convert to A/s
+        velocities *= 1e10
 
         # Thermostatted variables
         xi = 0.0
@@ -167,24 +156,39 @@ class NoseHooverAIMDSampler:
         coords = initial_coords.copy()
         frames = [coords.copy()]
 
-        for step in range(n_steps):
-            if force_fn is not None:
-                forces = force_fn(coords)
-            else:
-                # Harmonic restoring force fallback
-                forces = -0.5 * (coords - initial_coords) * 1e10
+        # Initial force calculation
+        try:
+            forces = force_fn(coords)
+        except Exception as e:
+            self.logger.error(f"Force evaluation failed: {e}")
+            raise RuntimeError(f"Force evaluation failed: {e}") from e
 
+        accel = (forces / (masses[:, np.newaxis] * 1.660539e-27)) * 1e-20 # A/s^2
+
+        for step in range(n_steps):
+            # First Velocity Half-Step + Thermostat
+            velocities += 0.5 * dt_s * (accel - v_xi * velocities)
+            
+            # Position Update
+            coords += velocities * dt_s
+            
+            # Update Forces at new position
+            try:
+                forces = force_fn(coords)
+            except Exception as e:
+                self.logger.error(f"Force evaluation failed at step {step}: {e}")
+                raise RuntimeError(f"Force evaluation failed at step {step}: {e}") from e
+                
             accel = (forces / (masses[:, np.newaxis] * 1.660539e-27)) * 1e-20 # A/s^2
 
-            # Velocity Verlet + Thermostat step
+            # Second Velocity Half-Step + Thermostat
             velocities += 0.5 * dt_s * (accel - v_xi * velocities)
-            coords += velocities * dt_s * 1e10 # m to A
             
-            # Update thermostat acceleration
+            # Update thermostat acceleration using full-step velocity
             ke = 0.5 * np.sum(masses[:, np.newaxis] * 1.660539e-27 * (velocities * 1e-10)**2)
             dof = 3 * n_atoms
             target_ke = 0.5 * dof * kB * self.target_temp_k
-            v_xi += 0.5 * dt_s * (ke - target_ke) / q_thermostat
+            v_xi += dt_s * (ke - target_ke) / q_thermostat  # Full step dt for thermostat
             
             frames.append(coords.copy())
 
@@ -194,11 +198,16 @@ class NoseHooverAIMDSampler:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("CoChem_KINETIC_AIMD")
     sampler = NoseHooverAIMDSampler()
     syms = ["Fe", "O", "O"]
     coords = np.array([[0.0,0.0,0.0], [0.0,0.0,1.2], [0.0,1.2,0.0]])
     masses = np.array([55.845, 15.999, 15.999])
-    trajectory = sampler.sample_nvt_trajectory(syms, coords, masses, n_steps=10)
+    
+    def dummy_force(c: np.ndarray) -> np.ndarray:
+        return -0.5 * (c - coords) * 1e10
+        
+    trajectory = sampler.sample_nvt_trajectory(syms, coords, masses, n_steps=10, force_fn=dummy_force)
     logger.info(f"AIMD Sampler test passed. Trajectory frames: {len(trajectory)}")
 
     p_beads = calculate_required_beads(300.0, 3000.0)

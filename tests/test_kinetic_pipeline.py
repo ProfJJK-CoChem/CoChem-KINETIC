@@ -112,9 +112,10 @@ def test_hindered_rotors_and_solvation() -> None:
     delta_g_hindered = pitzer_gwinn_hindered_rotor_correction(freq_cm1=50.0, barrier_kcal=2.5, temp=298.15)
     assert isinstance(delta_g_hindered, float)
 
-    # KINETIC-19: Implicit solvation
-    solv_g = apply_implicit_solvation_correction(delta_g_gas=12.0, delta_g_solv_ts=-3.0, delta_g_solv_reactants=-1.0)
-    assert abs(solv_g - 10.0) < 1e-4
+    # KINETIC-19: Implicit solvation (Deprecated)
+    import pytest
+    with pytest.raises(NotImplementedError):
+        apply_implicit_solvation_correction(delta_g_gas=12.0, delta_g_solv_ts=-3.0, delta_g_solv_reactants=-1.0)
 
 
 def test_cineb_mace_aimd_and_irc() -> None:
@@ -303,8 +304,6 @@ def test_kinetic_04_cineb_pes_store_streaming(tmp_path) -> None:
         val = float(np.sum(centered**2))
         grad = 2.0 * centered
         return val, grad
-
-        return float(np.sum(img**2)), 2.0 * img
 
     h5_path = tmp_path / "cineb_pes.h5"
     opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=3, pes_store=str(h5_path))

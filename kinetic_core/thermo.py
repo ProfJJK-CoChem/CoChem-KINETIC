@@ -11,7 +11,6 @@ and SMD/CPCM implicit solvation corrections.
 import math
 import logging
 import numpy as np
-from typing import Optional, Dict, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +20,8 @@ class MultireferenceDiagnosticError(Exception):
 
 
 def calculate_wigner_correction(
-    imag_freq: Optional[float] = None,
-    imaginary_freq: Optional[float] = None,
+    imag_freq: float | None = None,
+    imaginary_freq: float | None = None,
     temp: float = 298.15,
     force_eckart: bool = False,
     barrier_height_kcal: float = 10.0
@@ -83,7 +82,7 @@ def skodje_truhlar_tunneling_correction(imaginary_freq: float, barrier_height_kc
     return float(min(max(1.0, kappa), 1e20))
 
 
-def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float = 298.15, reaction_order: int = 1) -> float:
+def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float = 298.15, reaction_order: int = 1, mass_a_amu: float | None = None, mass_b_amu: float | None = None) -> float:
     """
     Computes Eyring TST rate constant k(T) (delta_g in kcal/mol).
     Applies standard state concentration correction (1.89 kcal/mol at 298K) for bimolecular (order 2) reactions.
@@ -101,8 +100,10 @@ def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float
         # Here we substitute the rigorous high-pressure recombination limit 
         # (Langevin-type capture for neutral radicals).
         
-        # Calculate reduced mass of two typical radicals (e.g., methyl, 15 amu each)
-        mu_amu = (15.0 * 15.0) / (15.0 + 15.0)
+        # Calculate reduced mass of the two reactants
+        if mass_a_amu is None or mass_b_amu is None:
+            raise ValueError("mass_a_amu and mass_b_amu must be provided for barrierless bimolecular reactions.")
+        mu_amu = (mass_a_amu * mass_b_amu) / (mass_a_amu + mass_b_amu)
         mu_kg = mu_amu * 1.660539e-27
         
         # Collision rate Z = N_A * pi * d_c^2 * sqrt(8 k_b T / (pi mu))
@@ -135,7 +136,7 @@ def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float
     return float(rate)
 
 
-def variational_tst_correction(irc_energies: np.ndarray, irc_zpes: Optional[np.ndarray] = None, irc_entropies: Optional[np.ndarray] = None, temp: float = 298.15) -> float:
+def variational_tst_correction(irc_energies: np.ndarray, irc_zpes: np.ndarray | None = None, irc_entropies: np.ndarray | None = None, temp: float = 298.15) -> float:
     """
     Variational Transition State Theory (VTST) implementation.
     Locates the true free energy maximum G^double-dagger(s) = E(s) + ZPE(s) - T S(s) along the IRC path.
@@ -153,17 +154,24 @@ def variational_tst_correction(irc_energies: np.ndarray, irc_zpes: Optional[np.n
 def calculate_vtst_rate(
     irc_s_coords: np.ndarray,
     irc_energies: np.ndarray,
-    irc_zpes: Optional[np.ndarray] = None,
-    irc_entropies: Optional[np.ndarray] = None,
+    irc_zpes: np.ndarray | None = None,
+    irc_entropies: np.ndarray | None = None,
     imaginary_freq: float = 500.0,
     temp: float = 298.15,
-    reaction_order: int = 1
+    reaction_order: int = 1,
+    mass_a_amu: float | None = None,
+    mass_b_amu: float | None = None
 ) -> dict:
     r"""
     Computes Canonical Variational Transition State Theory (CVTST) rate constant k^VTST(T).
     Finds the variational bottleneck s*(T) maximizing G^\dagger(s, T), evaluates Wigner tunneling,
     and returns rate constant k(T) and bottleneck location.
     """
+    try:
+        from scipy.interpolate import CubicSpline
+    except ImportError:
+        CubicSpline = None
+
     s_arr = np.asarray(irc_s_coords, dtype=float)
     e_arr = np.asarray(irc_energies, dtype=float)
     
@@ -173,12 +181,41 @@ def calculate_vtst_rate(
     if irc_entropies is not None and len(irc_entropies) == len(e_arr):
         g_profile -= temp * (irc_entropies / 1000.0)
 
-    max_idx = int(np.argmax(g_profile))
-    s_star = float(s_arr[max_idx]) if len(s_arr) == len(e_arr) else float(max_idx)
-    
-    delta_g_vtst = float(g_profile[max_idx] - g_profile[0])
+    # PRECISION FIX: Continuous Spline Interpolation instead of discrete np.argmax truncation
+    if len(s_arr) > 3 and CubicSpline is not None:
+        spline = CubicSpline(s_arr, g_profile)
+        # Find roots of the first derivative to locate exact local extrema
+        roots = spline.derivative().roots()
+        valid_roots = [r for r in roots if s_arr[0] <= r <= s_arr[-1]]
+        
+        if valid_roots:
+            # Evaluate free energy at all continuous extrema and endpoints
+            eval_points = valid_roots + [s_arr[0], s_arr[-1]]
+            g_vals = spline(eval_points)
+            max_idx_continuous = int(np.argmax(g_vals))
+            s_star = float(eval_points[max_idx_continuous])
+            max_g = float(g_vals[max_idx_continuous])
+            max_idx = int(np.argmin(np.abs(s_arr - s_star))) # Nearest grid point
+        else:
+            # Fallback to discrete if no valid roots found
+            max_idx = int(np.argmax(g_profile))
+            s_star = float(s_arr[max_idx])
+            max_g = float(g_profile[max_idx])
+    else:
+        max_idx = int(np.argmax(g_profile))
+        s_star = float(s_arr[max_idx])
+        max_g = float(g_profile[max_idx])
+
+    delta_g_vtst = float(max_g - float(g_profile[0]))
     kappa = wigner_correction(imaginary_freq, temp=temp)
-    rate_vtst = calculate_eyring_rate(delta_g_vtst, wigner_coeff=kappa, temp=temp, reaction_order=reaction_order)
+    rate_vtst = calculate_eyring_rate(
+        delta_g_vtst, 
+        wigner_coeff=kappa, 
+        temp=temp, 
+        reaction_order=reaction_order,
+        mass_a_amu=mass_a_amu,
+        mass_b_amu=mass_b_amu
+    )
 
     return {
         'k_vtst': rate_vtst,
@@ -258,7 +295,7 @@ def calculate_kie(rate_H: float, rate_D: float, freq_H: float = 0.0, freq_D: flo
     return float(base_kie)
 
 
-def validate_multireference_diagnostics(t1_diag: Optional[float], d1_diag: Optional[float], t1_threshold: float = 0.02, d1_threshold: float = 0.05) -> bool:
+def validate_multireference_diagnostics(t1_diag: float | None, d1_diag: float | None, t1_threshold: float = 0.02, d1_threshold: float = 0.05) -> bool:
     """
     Audits ORCA T1 and D1 multireference diagnostics before accepting single-reference TS energies.
     """
@@ -291,6 +328,6 @@ def pitzer_gwinn_hindered_rotor_correction(freq_cm1: float, barrier_kcal: float,
 def apply_implicit_solvation_correction(delta_g_gas: float, solvent_name: str = "water", delta_g_solv_ts: float = 0.0, delta_g_solv_reactants: float = 0.0) -> float:
     """
     Applies SMD/CPCM implicit solvation free energy corrections (Delta G_solv^double-dagger).
+    DEPRECATED: Module explicitly targets CP-FTMW supersonic jet vacuum expansions (1-2 K).
     """
-    delta_solv = delta_g_solv_ts - delta_g_solv_reactants
-    return float(delta_g_gas + delta_solv)
+    raise NotImplementedError("ERR_DOMAIN_VIOLATION: Implicit liquid-phase solvation fundamentally corrupts gas-phase CP-FTMW vacuum predictions. Use explicitly solvated microdroplets instead.")

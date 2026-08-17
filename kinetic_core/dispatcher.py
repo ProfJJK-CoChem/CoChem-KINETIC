@@ -1,5 +1,5 @@
-import hashlib
 #!/usr/bin/env python3
+import hashlib
 """
 CoChem-KINETIC - Stage 1: Payload Ingestion Dispatcher & HDF5 State Writer
 ----------------------------------------------------------------------------
@@ -12,7 +12,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Any
 import numpy as np
 
 try:
@@ -29,7 +29,7 @@ except ImportError:
 
 
 # v4 Wall-Clock Budgets (§8B)
-V4_WALLCLOCK_BUDGETS: Dict[str, float] = {
+V4_WALLCLOCK_BUDGETS: dict[str, float] = {
     "T1-10s": 10.0,
     "T1-1min": 60.0,
     "T1-30min": 1800.0,
@@ -43,7 +43,7 @@ V4_WALLCLOCK_BUDGETS: Dict[str, float] = {
 }
 
 # Tier hierarchy ranking for D5 safe overwrite checks
-TIER_HIERARCHY: Dict[str, int] = {
+TIER_HIERARCHY: dict[str, int] = {
     "T1-10s": 1,
     "T1-1min": 2,
     "T1-30min": 3,
@@ -60,7 +60,7 @@ TIER_HIERARCHY: Dict[str, int] = {
 class KineticDispatcher:
     """CLI and API Dispatcher for CoChem-KINETIC workflows with v4 State-Chaining & PESStore support."""
 
-    def __init__(self, workspace_dir: Optional[Path] = None) -> None:
+    def __init__(self, workspace_dir: Path | None = None) -> None:
         self.workspace_dir = Path(workspace_dir or os.environ.get("COCHEM_ARTIFACT_DIR", "."))
         self.logger = logging.getLogger("CoChem_KINETIC_Dispatcher")
 
@@ -124,13 +124,13 @@ class KineticDispatcher:
         self.logger.debug(f"D3 SCF Basin Check: density diff norm = {dist:.6e} (tol = {tol:.6e}) -> Passed: {passed}")
         return passed
 
-    def check_d4_cp_ghost_match(self, ghost_atoms_prev: Optional[List[int]], ghost_atoms_curr: Optional[List[int]]) -> bool:
+    def check_d4_cp_ghost_match(self, ghost_atoms_prev: list[int] | None, ghost_atoms_curr: list[int] | None) -> bool:
         """Rule D4: Counterpoise ghost atom match (exact index match)."""
         passed = sorted(ghost_atoms_prev or []) == sorted(ghost_atoms_curr or [])
         self.logger.debug(f"D4 Ghost Atom Match: prev={ghost_atoms_prev}, curr={ghost_atoms_curr} -> Passed: {passed}")
         return passed
 
-    def check_d5_safe_overwrite(self, meta_prev: Dict[str, Any], meta_curr: Dict[str, Any]) -> bool:
+    def check_d5_safe_overwrite(self, meta_prev: dict[str, Any], meta_curr: dict[str, Any]) -> bool:
         """Rule D5: Safe overwrite rule (higher or equal tier can update state; unverified lower tier cannot)."""
         tier_prev = meta_prev.get("wallclock_tier", "T1-10s")
         tier_curr = meta_curr.get("wallclock_tier", "T1-10s")
@@ -144,7 +144,7 @@ class KineticDispatcher:
             self.logger.warning(f"D5 Safe Overwrite Rejected: curr tier '{tier_curr}' (rank {rank_curr}) < prev tier '{tier_prev}' (rank {rank_prev}).")
             return False
 
-    def parse_payload_json(self, json_path: Path) -> Dict[str, Any]:
+    def parse_payload_json(self, json_path: Path) -> dict[str, Any]:
         """Parses input payload JSON file specifying reactants, products, and TS candidates."""
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.loads(f.read())
@@ -154,12 +154,12 @@ class KineticDispatcher:
     def write_state_hdf5(
         self,
         h5_path: Path,
-        thermo_data: Dict[str, float],
-        irc_coords: Optional[np.ndarray] = None,
-        irc_energies: Optional[np.ndarray] = None,
+        thermo_data: dict[str, float],
+        irc_coords: np.ndarray | None = None,
+        irc_energies: np.ndarray | None = None,
         tier_name: str = "T1-30min",
-        pes_store: Optional[PESStore] = None,
-        chaining_meta: Optional[Dict[str, Any]] = None,
+        pes_store: PESStore | None = None,
+        chaining_meta: dict[str, Any] | None = None,
     ):
         """
         Serializes rate parameters, Eyring thermo data, and IRC trajectory into h5_path.
@@ -220,19 +220,13 @@ class KineticDispatcher:
                 store = pes_store or PESStore(h5_path)
                 if irc_coords is not None and irc_energies is not None:
                     store.append_batch(irc_coords, irc_energies, group="grid", metadata={"wallclock_tier": tier_name})
-            except Exception as e:
+            except (OSError, ValueError, TypeError, RuntimeError) as e:
                 self.logger.warning(f"Could not append state data to PESStore: {e}")
 
         self.logger.info(f"Successfully serialized kinetic state to {h5_path.name} [Tier: {tier_name}, Budget: {budget_seconds}s].")
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    disp = KineticDispatcher()
-    sample_data = {"delta_g_barrier": 15.2, "k_eyring": 1.2e3, "temperature_k": 298.15}
-    h5_file = Path("./cochem_state.h5")
-    disp.write_state_hdf5(h5_file, sample_data, irc_energies=np.array([0.0, 15.2, 2.1]))
-    logger.info("Kinetic Dispatcher test passed.")
+
 
 def calculate_artifact_sha256(filepath: str | Path) -> str:
     """Calculates SHA-256 hash of a computational artifact."""

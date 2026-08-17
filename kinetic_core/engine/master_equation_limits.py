@@ -2,7 +2,6 @@ import logging
 import subprocess
 import tempfile
 import os
-from typing import Tuple, Optional
 from pydantic import BaseModel, Field, ConfigDict
 from kinetic_core.thermo import calculate_eyring_rate
 
@@ -20,7 +19,7 @@ class EvaluationParams(BaseModel):
     P_atm: float = Field(..., gt=0.0, description="Pressure in atmospheres")
 
 class MasterEquationSolver:
-    def __init__(self, config: Optional[MasterEquationConfig] = None, delta_g: Optional[float] = None, temp: float = 298.15):
+    def __init__(self, config: MasterEquationConfig | None = None, delta_g: float | None = None, temp: float = 298.15):
         if config is None:
             if delta_g is None:
                 raise ValueError("Either config or delta_g must be provided to MasterEquationSolver.")
@@ -51,10 +50,9 @@ class MasterEquationSolver:
 
     def evaluate_2d_ej(
         self, 
-        temp_range: Tuple[float, float], 
-        press_range: Tuple[float, float], 
-        N: int = 10000, 
-        auth_token: Optional[str] = None
+        temp_range: tuple[float, float], 
+        press_range: tuple[float, float], 
+        N: int = 10000
     ) -> float:
         from kinetic_core.swarm_messaging import MasterEquationGatekeeper
         
@@ -62,7 +60,7 @@ class MasterEquationSolver:
         num_grid_points = 100
         
         check = gatekeeper.request_diagonalization(N, num_grid_points)
-        if check["status"] == "Dry-Run" and auth_token != "/teamwork-preview":
+        if check["status"] == "Dry-Run":
             logger.warning(f"[DRY-RUN BLOCK] {check['reason']}")
             logger.warning(f"[PROPOSAL] {check['proposal']}")
             raise PermissionError("Dry-Run required explicit permission for massive matrix diagonalization.")

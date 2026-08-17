@@ -5,10 +5,10 @@ import logging
 
 class ProvenanceLogger:
     @staticmethod
-    def log_fallback(reason: str, method: str):
+    def log_fallback(reason: str, method: str) -> None:
         logging.warning(f"[E] Fallback triggered: {reason}. Using {method}.")
 
-def calculate_eckart_tunneling(imag_freq: float, temp: float, V_f: float = 10.0, V_r: float = 15.0) -> dict:
+def calculate_eckart_tunneling(imag_freq: float, temp: float, V_f: float, V_r: float) -> dict[str, float | str]:
     """
     Computes Eckart tunneling correction for an asymmetric barrier.
     Returns a dict with 'kappa' and 'provenance_tag'.
@@ -38,8 +38,8 @@ def calculate_eckart_tunneling(imag_freq: float, temp: float, V_f: float = 10.0,
     
     alpha = 2 * math.pi / C
     
-    def P_E(E):
-        if E < min(0, A_diff):
+    def P_E(E: float) -> float:
+        if E < min(0.0, A_diff):
             return 0.0
         
         a = alpha * math.sqrt(E) if E > 0 else 0.0
@@ -64,7 +64,12 @@ def calculate_eckart_tunneling(imag_freq: float, temp: float, V_f: float = 10.0,
         except OverflowError:
             return float(max(0.0, min(1.0, 1.0 - math.exp(-2.0 * b))))
 
-    integral, _ = quad(lambda E: P_E(E) * math.exp(-E / kT), 0, np.inf, limit=200)
+    try:
+        integral, _ = quad(lambda E: P_E(E) * math.exp(-E / kT), 0, np.inf, limit=200)
+    except Exception as e:
+        ProvenanceLogger.log_fallback(f"Quad integration failed: {e}", "kappa=1.0")
+        return {"kappa": 1.0, "provenance_tag": "[E]"}
+
     kappa = integral * math.exp(V_f / kT) / kT
 
     return {"kappa": float(min(max(1.0, kappa), 1e15)), "provenance_tag": "[M]"}
@@ -74,8 +79,8 @@ def calculate_wigner_correction(imag_freq: float, temp: float) -> float:
     Computes Wigner tunneling correction with a safety intercept for cryogenic temperatures.
     """
     if temp < 50.0:
-        ProvenanceLogger.log_fallback("Cryogenic temperature (T < 50 K) diverges for Wigner", "Eckart forced")
-        return calculate_eckart_tunneling(imag_freq, temp)["kappa"]
+        ProvenanceLogger.log_fallback("Cryogenic temperature (T < 50 K) diverges for Wigner", "No Tunneling (kappa=1.0)")
+        return 1.0
         
     hck = 1.43877 # cm*K
     alpha = (hck * imag_freq) / temp

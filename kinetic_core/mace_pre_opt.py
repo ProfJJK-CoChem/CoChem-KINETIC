@@ -10,7 +10,7 @@ Pairwise Lennard-Jones formulas are strictly prohibited per Method Matrix §8A.2
 
 import logging
 import numpy as np
-from typing import Any, Tuple, List, Optional
+from typing import Any
 
 try:
     import ase
@@ -45,19 +45,19 @@ class MACEPreOptimizer:
             calc = mace_off(model=self.model_name, device="cpu")
             self.logger.info(f"Initialized MACE-OFF24m ({self.model_name}) calculator.")
             return calc
-        except Exception as e:
+        except (ImportError, RuntimeError, ValueError) as e:
             self.logger.warning(f"MACE-OFF24m initialization failed ({e}). Falling back to RDKit MMFF94 / EMT.")
             try:
                 from ase.calculators.emt import EMT
                 return EMT()
-            except Exception:
+            except (ImportError, RuntimeError, ValueError):
                 return None
 
     def apply_float32_noise_guard(
         self,
-        prev_grad: Optional[np.ndarray],
+        prev_grad: np.ndarray | None,
         curr_grad: np.ndarray,
-        prev_energy: Optional[float],
+        prev_energy: float | None,
         curr_energy: float,
     ) -> bool:
         """
@@ -87,11 +87,11 @@ class MACEPreOptimizer:
 
     def pre_relax_geometry(
         self,
-        symbols: List[str],
+        symbols: list[str],
         coords: np.ndarray,
         max_steps: int = 50,
         fmax: float = 0.05,
-    ) -> Tuple[np.ndarray, float]:
+    ) -> tuple[np.ndarray, float]:
         """
         Pre-relaxes Cartesian coordinates using MACE / fallback potential.
         Includes Float32 precision floor guard (1e-5), fmax guard, and gradient sign-flip check.
@@ -130,7 +130,7 @@ class MACEPreOptimizer:
                     )
                     e_ev = float(ff.CalcEnergy()) * 0.0433641  # kcal/mol to eV
                     return opt_coords, e_ev
-            except Exception as exc:
+            except (ImportError, ValueError, RuntimeError) as exc:
                 self.logger.warning(f"RDKit MMFF94 pre-optimization failed: {exc}. Attempting GFN2-xTB / PySCF fallback.")
 
             # 2. GFN2-xTB via tblite
@@ -142,7 +142,7 @@ class MACEPreOptimizer:
                 opt_tb = BFGS(atoms_tb, logfile=None)
                 opt_tb.run(fmax=fmax_guarded, steps=max_steps)
                 return atoms_tb.get_positions(), float(atoms_tb.get_potential_energy())
-            except Exception as tb_exc:
+            except (ImportError, RuntimeError, ValueError) as tb_exc:
                 self.logger.warning(f"GFN2-xTB tblite fallback failed: {tb_exc}. Attempting PySCF ab initio fallback.")
 
             # 3. PySCF RHF fallback
@@ -156,7 +156,7 @@ class MACEPreOptimizer:
                 mf = scf.RHF(mol)
                 e_tot_hartree = float(mf.kernel())
                 return coords, e_tot_hartree * 27.211386245988
-            except Exception as py_exc:
+            except (ImportError, RuntimeError, ValueError) as py_exc:
                 self.logger.warning(f"PySCF ab initio fallback failed: {py_exc}. Using physical geometric centroid alignment.")
 
             # 4. Geometric / physical fallback (NO pairwise LJ)
@@ -202,11 +202,4 @@ class MACEPreOptimizer:
         self.logger.info(f"MACE Pre-Relaxation complete. Energy: {energy_ev:.4f} eV")
         return relaxed_coords, energy_ev
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    pre_opt = MACEPreOptimizer()
-    syms = ["O", "H", "H"]
-    coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
-    rel_coords, e = pre_opt.pre_relax_geometry(syms, coords, max_steps=5)
-    logger.info(f"MACE Pre-Optimizer test passed. Final E: {e:.4f} eV")
+

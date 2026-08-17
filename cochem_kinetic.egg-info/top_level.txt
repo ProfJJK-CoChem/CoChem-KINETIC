@@ -1,3 +1,0 @@
-kinetic_core
-notebooks
-tests

@@ -1,8 +1,11 @@
-from typing import Dict, Any
+from typing import Any
 
 class VTSTOptimizationGatekeeper:
-    def __init__(self, max_node_hours: float = 100.0):
-        self.max_node_hours = max_node_hours
+    def __init__(self, max_node_hours: float = 100.0) -> None:
+        try:
+            self.max_node_hours: float = float(max_node_hours)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"max_node_hours must be a valid float: {e}") from e
         
     def _estimate_cost(self, num_irc_points: int, level_of_theory: str, basis_functions: int = 100) -> float:
         """
@@ -10,11 +13,14 @@ class VTSTOptimizationGatekeeper:
         CCSD(T) scales as O(N^7) where N is the number of basis functions.
         DFT scales roughly as O(N^3) to O(N^4).
         """
-        # Baseline scaling factor to map to hours for a reference system (N=100)
-        # Assuming for N=100, DFT takes ~0.1 hours
-        # CCSD(T) takes ~5 hours
-        N = basis_functions
-        
+        try:
+            points = int(num_irc_points)
+            N = int(basis_functions)
+            if points < 0 or N <= 0:
+                raise ValueError("Points must be >= 0 and basis functions > 0.")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid inputs for cost estimation: {e}") from e
+            
         if "CCSD(T)" in level_of_theory:
             # O(N^7) scaling
             base_cost = 5.0
@@ -31,13 +37,25 @@ class VTSTOptimizationGatekeeper:
             scaling = (N / 100.0)**4
             cost_per_point = base_cost * scaling
             
-        return float(num_irc_points * cost_per_point)
+        return float(points * cost_per_point)
         
-    def request_vtst_optimization(self, num_irc_points: int, level_of_theory: str, force: bool = False, basis_functions: int = 100) -> Dict[str, Any]:
+    def request_vtst_optimization(
+        self, 
+        num_irc_points: int, 
+        level_of_theory: str, 
+        force: bool = False, 
+        basis_functions: int = 100
+    ) -> dict[str, Any]:
         """
         Gates the VTST optimization payload.
         """
-        estimated_cost = self._estimate_cost(num_irc_points, level_of_theory, basis_functions)
+        try:
+            estimated_cost = self._estimate_cost(num_irc_points, level_of_theory, basis_functions)
+        except ValueError as e:
+            return {
+                "status": "Error",
+                "message": str(e)
+            }
         
         if estimated_cost > self.max_node_hours and not force:
             return {

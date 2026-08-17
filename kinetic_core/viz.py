@@ -1,6 +1,3 @@
-import hashlib
-import logging
-logger = logging.getLogger(__name__)
 #!/usr/bin/env python3
 """
 CoChem-KINETIC - Stage 4: Interactive 3D HTML IRC Animation Generator
@@ -8,19 +5,23 @@ CoChem-KINETIC - Stage 4: Interactive 3D HTML IRC Animation Generator
 Renders 3D py3Dmol / Plotly HTML trajectory animations of IRC pathways for Jupyter UI.
 """
 
+import hashlib
+import logging
 import os
 from pathlib import Path
-from typing import Any, List, Optional
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class IRCAnimationVisualizer:
     """Generates interactive 3D HTML animations of IRC pathways."""
 
-    def __init__(self, output_dir: Optional[Path] = None) -> None:
+    def __init__(self, output_dir: Path | None = None) -> None:
         self.output_dir = output_dir or Path(os.environ.get("COCHEM_ARTIFACT_DIR", "."))
 
-    def build_multi_xyz_string(self, symbols: List[str], trajectory_coords: np.ndarray) -> str:
+    def build_multi_xyz_string(self, symbols: list[str], trajectory_coords: np.ndarray) -> str:
         """
         Converts 3D trajectory array (N_frames, N_atoms, 3) to Multi-XYZ string.
         """
@@ -33,7 +34,7 @@ class IRCAnimationVisualizer:
                 xyz_lines.append(f"{sym:2s} {x:12.6f} {y:12.6f} {z:12.6f}")
         return "\n".join(xyz_lines)
 
-    def generate_html_animation(self, reaction_name: str, symbols: List[str], trajectory_coords: np.ndarray) -> str:
+    def generate_html_animation(self, reaction_name: str, symbols: list[str], trajectory_coords: np.ndarray) -> str:
         """
         Generates a standalone HTML document embedding a 3D py3Dmol animation viewer.
         """
@@ -68,28 +69,31 @@ class IRCAnimationVisualizer:
 </html>
 """
         out_file = self.output_dir / f"{reaction_name}_irc_animation.html"
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write(html_content)
+        try:
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_file, "w", encoding="utf-8") as f:
+                f.write(html_content)
+        except PermissionError as e:
+            logger.error(f"Permission denied writing HTML animation: {e}")
+            raise
+        except OSError as e:
+            logger.error(f"OS error writing HTML animation: {e}")
+            raise
         return html_content
 
 
-if __name__ == "__main__":
-    viz = IRCAnimationVisualizer()
-    syms = ["O", "H", "H"]
-    traj = np.array([
-        [[0.0,0.0,0.0], [0.0,0.7,-0.4], [0.0,-0.7,-0.4]],
-        [[0.0,0.0,0.1], [0.0,0.8,-0.4], [0.0,-0.8,-0.4]]
-    ])
-    html = viz.generate_html_animation("Water_Inversion", syms, traj)
-    logger.info("IRC Animation Visualizer test passed.")
 def calculate_artifact_sha256(filepath: str | Path) -> str:
     """Calculates SHA-256 hash of a computational artifact."""
     p = Path(filepath)
-    if not p.exists():
-        raise FileNotFoundError(f"Artifact file not found: {filepath}")
     hasher = hashlib.sha256()
-    with open(p, "rb") as f:
-        while chunk := f.read(65536):
-            hasher.update(chunk)
+    try:
+        with open(p, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+    except FileNotFoundError as e:
+        logger.error(f"Artifact file not found: {filepath}")
+        raise
+    except OSError as e:
+        logger.error(f"OS error calculating hash for {filepath}: {e}")
+        raise
     return hasher.hexdigest()

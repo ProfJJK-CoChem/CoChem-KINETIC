@@ -4,9 +4,12 @@ import math
 class CollisionParameterWarning(UserWarning):
     pass
 class MasterEquation:
-    def __init__(self, bath_gas: str, delta_e_down: float):
+    def __init__(self, bath_gas: str, delta_e_down: float) -> None:
         self.bath_gas = bath_gas
-        self.delta_e_down = delta_e_down
+        try:
+            self.delta_e_down = float(delta_e_down)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid delta_e_down: {delta_e_down}") from e
         
         # Hard-sphere collision theory parameters
         # Argon mass (amu), Sigma (A), Epsilon (K)
