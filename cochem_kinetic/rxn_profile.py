@@ -1,18 +1,25 @@
 """
 CoChem-KINETIC Reaction-Profile Engine (`cochem-kinetic rxn-profile`)
 ---------------------------------------------------------------------
-End-to-end 5-stationary-point (R -> TS1 -> Int_tet -> TS2 -> P) engine:
+End-to-end charge-aware reaction-profile engine supporting both:
+  - 5-stationary-point stepwise pathways (R -> TS1 -> Int_tet -> TS2 -> P), with
+    either an explicit Int_tet.xyz or an auto-discovered midpoint intermediate.
+  - 3-stationary-point elementary pathways (R -> TS -> P) from 2-endpoint student
+    folders containing only reactant.xyz + product.xyz (or R.xyz + P.xyz).
+
+Stages:
   1. Strict stoichiometry, atom-ordering, charge, spin, and clash validation.
   2. Charge-aware AIMNet2 (`aimnet`, Q = -1, 0, +1; H,C,N,O,F,S) geometry optimization,
-     11-image ASE Climbing-Image NEB (IDPP interpolation), and saddle-point polish
-     (Sella internal-coordinate optimizer if installed, or Eckart-projected Partitioned
-     Rational Function Optimization [P-RFO] eigenvector-following).
+     midpoint intermediate discovery (for 2-endpoint inputs), 11-image ASE Climbing-Image
+     NEB (IDPP interpolation), and saddle-point polish (Sella internal-coordinate
+     optimizer if installed, or Eckart-projected Partitioned Rational Function
+     Optimization [P-RFO] eigenvector-following).
   3. Central-difference mass-weighted Eckart-projected Hessian analysis verifying
-     N_imag == 0 on minima (R, Int_tet, P) and N_imag == 1 on TS1/TS2 along the
-     forming/breaking bond (e.g. C-O), plus RRHO and Grimme qRRHO thermochemistry.
+     N_imag == 0 on minima and N_imag == 1 on transition states, plus RRHO and
+     Grimme qRRHO thermochemistry.
   4. Bidirectional mass-weighted IRC connectivity verification (IRCTracerEngine)
      confirming < 0.15 A heavy-atom RMSD and identical covalent bond graphs.
-  5. PySCF / GPU4PySCF DF-wB97X-D3/def2-TZVPP + PCM (or ddCOSMO) single-point
+  5. PySCF / GPU4PySCF DF-wB97X-D3/def2-TZVPP (or def2-SVP) + PCM/ddCOSMO single-point
      energies, wall-clock timing telemetry, CSV/Markdown tables, and SHA-256 manifest.
 """
 
@@ -30,16 +37,18 @@ from typing import Any
 import numpy as np
 
 from cochem_kinetic.chem312_specs import (
+    ELEMENTARY_STATIONARY_STATES,
     STATIONARY_STATES,
     formula_from_symbols,
     masses_from_symbols,
     read_xyz,
     resolve_solvent_eps,
     validate_stationary_stoichiometry,
+    write_multi_xyz,
     write_xyz,
 )
 from cochem_kinetic.math.thermodynamics import grimes_qrrho_entropy
-from kinetic_core.irc_tracer import IRCTracerEngine
+from kinetic_core.irc_tracer import IRCTracerEngine, heavy_atom_rmsd, kabsch_rmsd
 from kinetic_core.thermo import apply_implicit_solvation_correction
 
 logger = logging.getLogger("CoChem_KINETIC_RxnProfile")
@@ -77,6 +86,112 @@ def sha256_file(path: Path) -> str:
         while chunk := fh.read(65536):
             h.update(chunk)
     return h.hexdigest()
+
+
+STATE_FILENAME_ALIASES: dict[str, tuple[str, ...]] = {
+    "R": ("R.xyz", "reactant.xyz", "Reactant.xyz"),
+    "P": ("P.xyz", "product.xyz", "Product.xyz"),
+    "Int_tet": ("Int_tet.xyz", "intermediate.xyz", "int_tet.xyz"),
+    "TS1": ("TS1.xyz",),
+    "TS2": ("TS2.xyz",),
+    "TS": ("TS.xyz", "ts.xyz"),
+}
+
+ALL_CANDIDATE_STATES: tuple[str, ...] = ("R", "TS1", "Int_tet", "TS2", "TS", "P")
+
+
+def resolve_state_xyz_path(input_dir: str | Path, state: str) -> Path | None:
+    """Resolves a canonical state name (e.g. 'R', 'P', 'Int_tet') to an existing XYZ file."""
+    base = Path(input_dir)
+    candidates = STATE_FILENAME_ALIASES.get(state, (f"{state}.xyz",))
+    for fname in candidates:
+        p = base / fname
+        if p.is_file():
+            return p
+    return None
+
+
+def load_reaction_inputs(
+    input_dir: str | Path,
+    required_states: tuple[str, ...] = ("R", "P"),
+    candidate_states: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """
+    Loads reaction XYZ geometries from `input_dir`, accepting both canonical names
+    (`R.xyz`, `P.xyz`, `Int_tet.xyz`, `TS1.xyz`, `TS2.xyz`, `TS.xyz`) and student
+    2-endpoint aliases (`reactant.xyz`, `product.xyz`).
+    """
+    base = Path(input_dir)
+    loaded: dict[str, dict[str, Any]] = {}
+    search_order: list[str] = list(
+        candidate_states if candidate_states is not None else ALL_CANDIDATE_STATES
+    )
+    for st in required_states:
+        if st not in search_order:
+            search_order.append(st)
+
+    for st in search_order:
+        p = resolve_state_xyz_path(base, st)
+        if p is not None:
+            syms, coords, comment = read_xyz(p)
+            loaded[st] = {
+                "symbols": syms,
+                "coords": coords,
+                "comment": comment,
+                "source": str(p),
+                "source_filename": p.name,
+            }
+        elif st in required_states:
+            aliases = STATE_FILENAME_ALIASES.get(st, (f"{st}.xyz",))
+            alias_str = " or ".join(repr(a) for a in aliases)
+            raise FileNotFoundError(
+                f"Required input XYZ for state '{st}' ({alias_str}) not found in {base}."
+            )
+    return loaded
+
+
+def detect_input_mode(loaded: dict[str, Any]) -> str:
+    """
+    Classifies loaded input geometries:
+      - '5pt_explicit' when 'Int_tet' is present alongside endpoints.
+      - '2pt_auto' when 'R' and 'P' are present without 'Int_tet'.
+      - 'custom' otherwise (e.g. single monomer).
+    """
+    if "Int_tet" in loaded:
+        return "5pt_explicit"
+    if "R" in loaded and "P" in loaded:
+        return "2pt_auto"
+    return "custom"
+
+
+def kabsch_align(coords: np.ndarray, ref_coords: np.ndarray) -> np.ndarray:
+    """Rigidly rotates and translates `coords` onto `ref_coords` via proper Kabsch alignment."""
+    a0 = np.asarray(ref_coords, dtype=np.float64)
+    b0 = np.asarray(coords, dtype=np.float64)
+    a_mean = np.mean(a0, axis=0)
+    b_mean = np.mean(b0, axis=0)
+    cov = (b0 - b_mean).T @ (a0 - a_mean)
+    u_mat, _, vt_mat = np.linalg.svd(cov)
+    rot = vt_mat.T @ u_mat.T
+    if np.linalg.det(rot) < 0.0:
+        vt_mat[-1, :] *= -1.0
+        rot = vt_mat.T @ u_mat.T
+    return (b0 - b_mean) @ rot.T + a_mean
+
+
+def _min_interatomic_distance(coords: np.ndarray) -> float:
+    """Returns minimum pairwise interatomic distance in Angstrom."""
+    c = np.asarray(coords, dtype=np.float64)
+    n = len(c)
+    if n < 2:
+        return float("inf")
+    min_d = float("inf")
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = float(np.linalg.norm(c[i] - c[j]))
+            if d < min_d:
+                min_d = d
+    return min_d
 
 
 # =============================================================================
@@ -458,6 +573,123 @@ def relax_minimum_aimnet2(
     return np.asarray(atoms.get_positions(), dtype=np.float64), float(atoms.get_potential_energy()), cur_fmax
 
 
+def discover_midpoint_intermediate_aimnet2(
+    symbols: list[str],
+    r_coords: np.ndarray,
+    p_coords: np.ndarray,
+    charge: int = 0,
+    multiplicity: int = 1,
+    temp_k: float = 298.15,
+    calc: Any | None = None,
+    rmsd_threshold_ang: float = 0.25,
+    fmax_threshold_ev_ang: float = 0.02,
+    opt_fmax: float = 0.005,
+    max_steps: int = 400,
+    min_clash_dist_ang: float = 0.45,
+) -> dict[str, Any]:
+    """
+    Tests whether the midpoint between relaxed reactant R and product P relaxes
+    under AIMNet2 to a genuine distinct local minimum (e.g. a tetrahedral oxyanion
+    intermediate Int_tet in anionic acyl substitution):
+      - converged optimization (fmax < fmax_threshold_ev_ang, default 0.02 eV/A)
+      - distinct geometry from both R and P (Kabsch RMSD > rmsd_threshold_ang, default 0.25 A)
+      - genuine minimum verified by Eckart-projected Hessian (N_imag == 0)
+
+    Evaluates both the direct atom-mapped midpoint 0.5 * (R + P) and the Kabsch-aligned
+    midpoint 0.5 * (R + P_aligned) whenever non-clashing, selecting the lowest-energy
+    qualifying distinct intermediate. Never fabricates an intermediate if none exists.
+    """
+    t0 = time.perf_counter()
+    eff_calc = build_aimnet2_calculator(charge, multiplicity) if calc is None else calc
+    r_arr = np.asarray(r_coords, dtype=np.float64)
+    p_arr = np.asarray(p_coords, dtype=np.float64)
+
+    raw_mid = 0.5 * (r_arr + p_arr)
+    p_aligned = kabsch_align(p_arr, r_arr)
+    aligned_mid = 0.5 * (r_arr + p_aligned)
+
+    guess_list: list[tuple[str, np.ndarray]] = []
+    if _min_interatomic_distance(raw_mid) >= min_clash_dist_ang:
+        guess_list.append(("direct_midpoint", raw_mid))
+    if _min_interatomic_distance(aligned_mid) >= min_clash_dist_ang:
+        if not guess_list or kabsch_rmsd(aligned_mid, raw_mid) > 0.05:
+            guess_list.append(("kabsch_midpoint", aligned_mid))
+
+    candidate_records: list[dict[str, Any]] = []
+    best_candidate: dict[str, Any] | None = None
+    best_coords: np.ndarray | None = None
+    best_hessian: dict[str, Any] | None = None
+
+    for label, guess in guess_list:
+        opt_coords, opt_e_ev, opt_fmax_actual = relax_minimum_aimnet2(
+            symbols,
+            guess,
+            charge=charge,
+            multiplicity=multiplicity,
+            calc=eff_calc,
+            fmax=opt_fmax,
+            max_steps=max_steps,
+        )
+        rmsd_r = kabsch_rmsd(opt_coords, r_arr)
+        rmsd_p = kabsch_rmsd(opt_coords, p_arr)
+        heavy_rmsd_r = heavy_atom_rmsd(symbols, opt_coords, r_arr)
+        heavy_rmsd_p = heavy_atom_rmsd(symbols, opt_coords, p_arr)
+
+        converged_opt = bool(math.isfinite(opt_fmax_actual) and opt_fmax_actual < fmax_threshold_ev_ang)
+        distinct_from_endpoints = bool(rmsd_r > rmsd_threshold_ang and rmsd_p > rmsd_threshold_ang)
+
+        n_imag: int | None = None
+        hess_res: dict[str, Any] | None = None
+        qualifies = False
+        if converged_opt and distinct_from_endpoints:
+            hess_res = analyze_stationary_point_aimnet2(
+                symbols=symbols,
+                coords=opt_coords,
+                charge=charge,
+                multiplicity=multiplicity,
+                temp_k=temp_k,
+                calc=eff_calc,
+            )
+            n_imag = int(hess_res["thermo"]["n_imag"])
+            qualifies = n_imag == 0
+
+        rec = {
+            "candidate": label,
+            "energy_ev": float(opt_e_ev),
+            "fmax_ev_ang": float(opt_fmax_actual),
+            "converged_opt": converged_opt,
+            "rmsd_from_r_ang": round(float(rmsd_r), 5),
+            "rmsd_from_p_ang": round(float(rmsd_p), 5),
+            "heavy_rmsd_from_r_ang": round(float(heavy_rmsd_r), 5),
+            "heavy_rmsd_from_p_ang": round(float(heavy_rmsd_p), 5),
+            "distinct_from_endpoints": distinct_from_endpoints,
+            "n_imag": n_imag,
+            "qualifies": qualifies,
+        }
+        candidate_records.append(rec)
+
+        if qualifies and (best_candidate is None or opt_e_ev < best_candidate["energy_ev"]):
+            best_candidate = rec
+            best_coords = opt_coords
+            best_hessian = hess_res
+
+    wall_s = round(time.perf_counter() - t0, 3)
+    return {
+        "discovered": best_candidate is not None,
+        "coords": best_coords,
+        "hessian": best_hessian,
+        "energy_ev": best_candidate["energy_ev"] if best_candidate is not None else None,
+        "fmax_ev_ang": best_candidate["fmax_ev_ang"] if best_candidate is not None else None,
+        "rmsd_from_r_ang": best_candidate["rmsd_from_r_ang"] if best_candidate is not None else None,
+        "rmsd_from_p_ang": best_candidate["rmsd_from_p_ang"] if best_candidate is not None else None,
+        "source_candidate": best_candidate["candidate"] if best_candidate is not None else None,
+        "rmsd_threshold_ang": float(rmsd_threshold_ang),
+        "fmax_threshold_ev_ang": float(fmax_threshold_ev_ang),
+        "candidates": candidate_records,
+        "wall_seconds": wall_s,
+    }
+
+
 def run_cineb_aimnet2(
     symbols: list[str],
     start_coords: np.ndarray,
@@ -487,15 +719,7 @@ def run_cineb_aimnet2(
     # Rigidly align end_coords onto start_coords (Kabsch) to prevent artificial rotation in IDPP interpolation
     a0 = np.asarray(start_coords, dtype=np.float64)
     b0 = np.asarray(end_coords, dtype=np.float64)
-    a_mean = np.mean(a0, axis=0)
-    b_mean = np.mean(b0, axis=0)
-    cov = (b0 - b_mean).T @ (a0 - a_mean)
-    u_mat, _, vt_mat = np.linalg.svd(cov)
-    rot = vt_mat.T @ u_mat.T
-    if np.linalg.det(rot) < 0.0:
-        vt_mat[-1, :] *= -1.0
-        rot = vt_mat.T @ u_mat.T
-    b_aligned = (b0 - b_mean) @ rot.T + a_mean
+    b_aligned = kabsch_align(b0, a0)
 
     images: list[Any] = []
     for idx in range(n_images):
@@ -735,20 +959,70 @@ def optimize_ts_aimnet2(
 
         t0 = time.perf_counter()
         atoms = _make_ase_atoms(symbols, initial_coords, charge, multiplicity, eff_calc)
-        opt = Sella(atoms, internal=True, logfile=None)
-        opt.run(fmax=fmax, steps=max_steps)
-        pos = np.asarray(atoms.get_positions(), dtype=np.float64)
-        e_ev = float(atoms.get_potential_energy())
-        cur_fmax = float(np.max(np.linalg.norm(atoms.get_forces(), axis=1)))
-        return {
+        sella_error: str | None = None
+        try:
+            opt = Sella(atoms, internal=True, logfile=None)
+            opt.run(fmax=fmax, steps=max_steps)
+            pos = np.asarray(atoms.get_positions(), dtype=np.float64)
+            e_ev = float(atoms.get_potential_energy())
+            cur_fmax = float(np.max(np.linalg.norm(atoms.get_forces(), axis=1)))
+            n_steps = int(opt.nsteps)
+        except Exception as exc:
+            if method == "sella":
+                raise
+            sella_error = f"{type(exc).__name__}: {exc}"
+            pos = np.asarray(initial_coords, dtype=np.float64)
+            e_ev = float("nan")
+            cur_fmax = float("inf")
+            n_steps = 0
+
+        sella_res: dict[str, Any] = {
             "coords": pos,
             "energy_ev": e_ev,
             "fmax_ev_ang": cur_fmax,
-            "converged": bool(cur_fmax <= fmax),
-            "steps": int(opt.nsteps),
+            "converged": bool(sella_error is None and cur_fmax <= fmax),
+            "steps": n_steps,
             "method": "sella_internal",
             "wall_seconds": round(time.perf_counter() - t0, 3),
         }
+        if sella_error is not None:
+            sella_res["sella_error"] = sella_error
+
+        if method == "sella":
+            return sella_res
+
+        # In auto mode, verify whether Sella actually reached a 1st-order saddle point (N_imag == 1).
+        # If not, refine with exact-Hessian Eckart P-RFO; never fabricate N_imag == 1.
+        sella_n_imag: int | None = None
+        if sella_error is None:
+            hess_check = analyze_stationary_point_aimnet2(
+                symbols=symbols,
+                coords=pos,
+                charge=charge,
+                multiplicity=multiplicity,
+                calc=eff_calc,
+            )
+            sella_n_imag = int(hess_check["thermo"]["n_imag"])
+            if sella_res["converged"] and sella_n_imag == 1:
+                return sella_res
+
+        prfo_start = pos if (sella_error is None and np.all(np.isfinite(pos))) else initial_coords
+        prfo_res = optimize_ts_prfo_aimnet2(
+            symbols=symbols,
+            initial_coords=prfo_start,
+            charge=charge,
+            multiplicity=multiplicity,
+            calc=eff_calc,
+            fmax=fmax,
+            max_steps=max_steps,
+            target_bond_pair=target_bond_pair,
+        )
+        prfo_res["fallback_from"] = "sella_internal"
+        prfo_res["sella_fmax_ev_ang"] = cur_fmax if math.isfinite(cur_fmax) else None
+        prfo_res["sella_n_imag"] = sella_n_imag
+        if sella_error is not None:
+            prfo_res["sella_error"] = sella_error
+        return prfo_res
 
     return optimize_ts_prfo_aimnet2(
         symbols=symbols,
@@ -1038,10 +1312,22 @@ def assemble_and_export_profile(
     xyz_dir = out / "geometries"
     xyz_dir.mkdir(parents=True, exist_ok=True)
 
-    ordered_states = [s for s in STATIONARY_STATES if s in states_data]
+    requested_order = metadata.get("stationary_points")
+    if requested_order:
+        ordered_states = [s for s in requested_order if s in states_data]
+    elif set(states_data.keys()) == set(ELEMENTARY_STATIONARY_STATES):
+        ordered_states = list(ELEMENTARY_STATIONARY_STATES)
+    else:
+        ordered_states = [s for s in STATIONARY_STATES if s in states_data]
     for s in states_data:
         if s not in ordered_states:
             ordered_states.append(s)
+
+    pathway_mode = str(
+        metadata.get("pathway_mode")
+        or ("elementary_3pt" if ordered_states == list(ELEMENTARY_STATIONARY_STATES) else "stepwise_5pt")
+    )
+    input_mode = str(metadata.get("input_mode") or "5pt_explicit")
 
     # Export converged XYZs
     xyz_paths: dict[str, Path] = {}
@@ -1053,6 +1339,39 @@ def assemble_and_export_profile(
         )
         p = write_xyz(xyz_dir / f"{st}.xyz", entry["symbols"], np.asarray(entry["coords"], dtype=np.float64), comment)
         xyz_paths[st] = p
+
+    # Export top-level ts_polished.xyz for the primary (or highest-energy) TS state
+    ts_states = [s for s in ordered_states if s.startswith("TS")]
+    primary_ts_state: str | None = None
+    if "TS" in states_data:
+        primary_ts_state = "TS"
+    elif ts_states:
+        def _ts_sort_energy(st_name: str) -> float:
+            d = states_data[st_name].get("dft", {})
+            if d.get("converged") and "e_tot_ha" in d and math.isfinite(float(d["e_tot_ha"])):
+                return float(d["e_tot_ha"])
+            h = states_data[st_name].get("hessian", {})
+            return float(h.get("aimnet2_energy_ha", float("-inf")))
+
+        primary_ts_state = max(ts_states, key=_ts_sort_energy)
+
+    ts_polished_path: Path | None = None
+    if primary_ts_state is not None:
+        ts_entry = states_data[primary_ts_state]
+        ts_thermo = ts_entry.get("hessian", {}).get("thermo", {})
+        ts_imag_list = ts_thermo.get("imag_freqs_cm1", [])
+        ts_imag_lbl = f"{ts_imag_list[0]:.2f} cm^-1" if ts_imag_list else "none"
+        ts_comment = (
+            f"{case_name} | {primary_ts_state} ({pathway_mode}) | Q={stoich_report['charge']} "
+            f"M={stoich_report['multiplicity']} | N_imag={ts_thermo.get('n_imag', -1)} ({ts_imag_lbl}) "
+            f"| E_DFT_Ha={ts_entry.get('dft', {}).get('e_tot_ha', 'PENDING')}"
+        )
+        ts_polished_path = write_xyz(
+            out / "ts_polished.xyz",
+            ts_entry["symbols"],
+            np.asarray(ts_entry["coords"], dtype=np.float64),
+            ts_comment,
+        )
 
     # Reference state R
     ref = states_data.get("R", {})
@@ -1091,12 +1410,21 @@ def assemble_and_export_profile(
         n_imag = int(thermo.get("n_imag", -1)) if thermo else -1
         imag_str = f"{imag_freqs[0]:.2f}" if imag_freqs else "0.00"
 
-        # Top forming/breaking C-O distance if TS
+        # Top forming/breaking bond distance if TS (prefer C-O for acyl/carbonate, else top heavy-atom pair)
         top_co = ""
-        for item in hess.get("imag_mode_bond_activity", []):
+        bond_activity = hess.get("imag_mode_bond_activity", [])
+        for item in bond_activity:
             if item.get("elements") == ["C", "O"]:
                 top_co = f"{item['label']}={item['distance_ang']:.3f}A"
                 break
+        if not top_co and bond_activity:
+            for item in bond_activity:
+                if "H" not in item.get("elements", []):
+                    top_co = f"{item['label']}={item['distance_ang']:.3f}A"
+                    break
+            if not top_co:
+                item0 = bond_activity[0]
+                top_co = f"{item0['label']}={item0['distance_ang']:.3f}A"
 
         rows.append(
             {
@@ -1131,15 +1459,17 @@ def assemble_and_export_profile(
         writer.writerows(rows)
 
     # Write stationary_table.md
+    n_pts = len(ordered_states)
     md_lines = [
-        f"# {case_name} — 5-Stationary-Point Reaction Profile",
+        f"# {case_name} — {n_pts}-Stationary-Point Reaction Profile",
         "",
         f"- **Reaction:** `{reaction_equation}`",
+        f"- **Pathway Mode:** `{pathway_mode}` (`{input_mode}`)",
         f"- **Formula / Charge / Spin:** `{stoich_report['formula']}` ({stoich_report['n_atoms']} atoms, Q = {stoich_report['charge']}, M = {stoich_report['multiplicity']})",
         f"- **DFT Level:** `DF-{metadata.get('xc', 'wb97x').upper()}-{metadata.get('disp', 'd3zero').upper()}/{metadata.get('basis', 'def2-tzvpp')}` + `{metadata.get('solvation_model', 'pcm').upper()}({metadata.get('solvent_name', 'acetonitrile')}, eps={metadata.get('eps', 'N/A')})`",
         f"- **Thermochemistry Temperature:** `{metadata.get('temp_k', 298.15)} K` (AIMNet2 Hessian + RRHO / Grimme qRRHO)",
         "",
-        "| State | Status | N_imag | Imag Freq (cm^-1) | Key C-O Bond | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",
+        "| State | Status | N_imag | Imag Freq (cm^-1) | Key Active Bond | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",
         "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
@@ -1187,7 +1517,7 @@ def assemble_and_export_profile(
         clean_irc[k] = {
             ik: iv
             for ik, iv in v.items()
-            if ik not in {"path_coords", "endpoint_a_coords", "endpoint_b_coords"}
+            if ik not in {"path_coords", "path_energies", "endpoint_a_coords", "endpoint_b_coords"}
         }
         if "path_energies" in v:
             clean_irc[k]["path_energies_ev"] = [float(x) for x in v["path_energies"]]
@@ -1204,16 +1534,37 @@ def assemble_and_export_profile(
             "dft_cpu_benchmark": entry.get("dft_cpu_benchmark"),
         }
 
-    results_payload = {
+    ts_n_imag_by_state: dict[str, int] = {
+        st: int(states_data[st].get("hessian", {}).get("thermo", {}).get("n_imag", -1))
+        for st in ts_states
+    }
+    ts_n_imag_value: int | dict[str, int]
+    if len(ts_states) == 1:
+        ts_n_imag_value = ts_n_imag_by_state[ts_states[0]]
+    else:
+        ts_n_imag_value = ts_n_imag_by_state
+
+    results_payload: dict[str, Any] = {
         "schema_version": "cochem.kinetic.rxn-profile/1",
         "case_name": case_name,
         "reaction_equation": reaction_equation,
+        "pathway_mode": pathway_mode,
+        "input_mode": input_mode,
+        "stationary_points": ordered_states,
+        "ts_n_imaginary_modes": ts_n_imag_value,
+        "ts_n_imaginary_modes_by_state": ts_n_imag_by_state,
+        "ts_all_first_order": bool(ts_states and all(v == 1 for v in ts_n_imag_by_state.values())),
+        "primary_ts_state": primary_ts_state,
         "metadata": metadata,
         "stoichiometry": stoich_report,
         "stationary_table": rows,
         "states": clean_states,
         "irc_verification": clean_irc,
     }
+    if metadata.get("intermediate_discovery") is not None:
+        results_payload["intermediate_discovery"] = metadata["intermediate_discovery"]
+    if metadata.get("ts_diagnostics") is not None:
+        results_payload["ts_diagnostics"] = metadata["ts_diagnostics"]
     results_path = out / "results.json"
     results_path.write_text(json.dumps(results_payload, indent=2) + "\n", encoding="utf-8")
 
@@ -1233,9 +1584,15 @@ def assemble_and_export_profile(
     manifest_path.write_text(json.dumps(manifest_payload, indent=2) + "\n", encoding="utf-8")
 
     return {
+        "pathway_mode": pathway_mode,
+        "input_mode": input_mode,
+        "stationary_points": ordered_states,
+        "ts_n_imaginary_modes": ts_n_imag_value,
+        "ts_all_first_order": results_payload["ts_all_first_order"],
         "csv_path": str(csv_path),
         "md_path": str(md_path),
         "results_path": str(results_path),
+        "ts_polished_path": str(ts_polished_path) if ts_polished_path is not None else None,
         "manifest_path": str(manifest_path),
         "rows": rows,
     }
