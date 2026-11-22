@@ -82,14 +82,29 @@ def skodje_truhlar_tunneling_correction(imaginary_freq: float, barrier_height_kc
     return float(min(max(1.0, kappa), 1e20))
 
 
-def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float = 298.15, reaction_order: int = 1, mass_a_amu: float | None = None, mass_b_amu: float | None = None) -> float:
+def calculate_eyring_rate(
+    delta_g: float,
+    wigner_coeff: float = 1.0,
+    temp: float = 298.15,
+    reaction_order: int = 1,
+    mass_a_amu: float | None = None,
+    mass_b_amu: float | None = None,
+    pressure_atm: float = 1.0,
+) -> float:
     """
-    Computes Eyring TST rate constant k(T) (delta_g in kcal/mol).
-    Applies standard state concentration correction (1.89 kcal/mol at 298K) for bimolecular (order 2) reactions.
+    Computes Eyring TST rate constant k(T) (delta_g in kcal/mol at 1 atm standard state).
+    Applies temperature-dependent ideal-gas standard-state conversion V_m = R*T/P
+    for bimolecular (order 2) reactions, returning s^-1 (order 1) or L/(mol*s) (order 2).
     """
-    h = 6.62607015e-34  # Planck constant in J s
-    kB = 1.380649e-23   # Boltzmann constant in J/K
-    R = 1.987204258e-3  # Gas constant in kcal/(K*mol)
+    if temp <= 0.0:
+        raise ValueError("Temperature must be strictly positive (K).")
+    if pressure_atm <= 0.0:
+        raise ValueError("Pressure must be strictly positive (atm).")
+
+    h = 6.62607015e-34      # Planck constant in J s
+    kB = 1.380649e-23       # Boltzmann constant in J/K
+    R = 1.987204258e-3      # Gas constant in kcal/(K*mol)
+    R_L_atm = 0.082057366080960  # Gas constant in L*atm/(K*mol)
     
     prefactor = (kB * temp) / h
     
@@ -119,19 +134,17 @@ def calculate_eyring_rate(delta_g: float, wigner_coeff: float = 1.0, temp: float
         
         return float(z_collision_cm3_mol_s)
         
-    # Standard state concentration correction: c_deg = 1 / 24.46 M for 1 atm ideal gas at 298.15 K
+    # Temperature-dependent ideal-gas molar volume V_m = R*T/P (L/mol)
+    molar_volume_L = (R_L_atm * temp) / pressure_atm
     delta_g_eff = delta_g
     if reaction_order == 2:
-        # Standard state concentration term R T ln(c_deg)
-        c_deg_correction = R * temp * np.log(1.0 / 24.46) # ~ -1.89 kcal/mol shift
+        # Convert 1 atm standard-state Delta G^ddagger to 1 M standard state (Delta n^ddagger = -1):
+        # K_c^ddagger = K_p^ddagger * (R*T/P), so Delta G_1M^ddagger = Delta G_1atm^ddagger + R*T*ln(1 / V_m)
+        c_deg_correction = R * temp * np.log(1.0 / molar_volume_L)
         delta_g_eff += c_deg_correction
 
     exponential = np.exp(-delta_g_eff / (R * temp))
     rate = wigner_coeff * prefactor * exponential
-    
-    # Convert units for bimolecular rate constant if reaction_order == 2
-    if reaction_order == 2:
-        rate *= 24.46  # L/(mol*s)
 
     return float(rate)
 
@@ -325,9 +338,39 @@ def pitzer_gwinn_hindered_rotor_correction(freq_cm1: float, barrier_kcal: float,
     return float(delta_g)
 
 
-def apply_implicit_solvation_correction(delta_g_gas: float, solvent_name: str = "water", delta_g_solv_ts: float = 0.0, delta_g_solv_reactants: float = 0.0) -> float:
+SUPPORTED_SOLVATION_PHASES = {"gas", "pcm", "ddcosmo", "cpcm", "iefpcm", "smd"}
+
+
+def apply_implicit_solvation_correction(
+    delta_g_gas: float,
+    solvent_name: str = "water",
+    delta_g_solv_ts: float = 0.0,
+    delta_g_solv_reactants: float = 0.0,
+    phase: str = "pcm",
+    gas_phase_ftmw_lock: bool = False,
+) -> float:
     """
-    Applies SMD/CPCM implicit solvation free energy corrections (Delta G_solv^double-dagger).
-    DEPRECATED: Module explicitly targets CP-FTMW supersonic jet vacuum expansions (1-2 K).
+    Phase-aware solvation free-energy API supporting gas-phase (CP-FTMW) and
+    continuum solvation (PCM / ddCOSMO / CPCM / IEFPCM / SMD) calculations.
+
+    Raises RuntimeError('ERR_DOMAIN_VIOLATION: ...') ONLY when implicit
+    solvation is requested while gas_phase_ftmw_lock=True.
     """
-    raise NotImplementedError("ERR_DOMAIN_VIOLATION: Implicit liquid-phase solvation fundamentally corrupts gas-phase CP-FTMW vacuum predictions. Use explicitly solvated microdroplets instead.")
+    phase_norm = phase.strip().lower()
+    if phase_norm not in SUPPORTED_SOLVATION_PHASES:
+        raise ValueError(
+            f"Unsupported phase '{phase}'. Expected one of {sorted(SUPPORTED_SOLVATION_PHASES)}."
+        )
+
+    if phase_norm == "gas":
+        return float(delta_g_gas)
+
+    if gas_phase_ftmw_lock:
+        raise RuntimeError(
+            "ERR_DOMAIN_VIOLATION: Implicit liquid-phase solvation "
+            f"(phase='{phase_norm}', solvent='{solvent_name}') is prohibited when "
+            "gas_phase_ftmw_lock=True (gas-phase CP-FTMW vacuum mode). "
+            "Use phase='gas' or explicit microsolvation instead."
+        )
+
+    return float(delta_g_gas + (delta_g_solv_ts - delta_g_solv_reactants))

@@ -1,0 +1,82 @@
+{
+  "spec": {
+    "name": "team4_diol_dmc_intermolecular",
+    "course": "CHEM 312 Spring 2027",
+    "family": "Family B (Anionic Carbonate Transesterification - Intermolecular Step)",
+    "team": "Team 4 (Step 1)",
+    "reaction_equation": "HO-CH2CH2-O- + (CH3O)2C=O -> TS1 -> Int_tet -> TS2 -> HO-CH2CH2-OC(=O)OMe + MeO-",
+    "formula": "C5H11O5-",
+    "element_counts": {
+      "C": 5,
+      "H": 11,
+      "O": 5
+    },
+    "n_atoms": 21,
+    "charge": -1,
+    "multiplicity": 1,
+    "default_solvent": "acetonitrile",
+    "default_eps": 35.688,
+    "default_temp_k": 298.15,
+    "stationary_states": [
+      "R",
+      "TS1",
+      "Int_tet",
+      "TS2",
+      "P"
+    ],
+    "ts1_description": "Intermolecular nucleophilic attack of HO-CH2CH2-O- alkoxide onto dimethyl carbonate (DMC) carbonyl C",
+    "int_description": "Acyclic anionic tetrahedral intermediate (HO-CH2CH2-O-C(O-)(OMe)2)",
+    "ts2_description": "Elimination of methoxide MeO- yielding monocarbonate intermediate HO-CH2CH2-OC(=O)OMe",
+    "reactant_fragments": [
+      "HO-CH2CH2-O- (C2H5O2-, 9)",
+      "DMC (C3H6O3, 12)"
+    ],
+    "product_fragments": [
+      "HO-CH2CH2-OC(=O)OMe (C4H8O4, 16)",
+      "Methoxide MeO- (CH3O-, 5)"
+    ]
+  },
+  "stoichiometry_validation": {
+    "valid": true,
+    "states_checked": [
+      "R",
+      "Int_tet",
+      "P"
+    ],
+    "charge": -1,
+    "multiplicity": 1,
+    "per_state": {
+      "R": {
+        "n_atoms": 21,
+        "formula": "C5H11O5-",
+        "charge": -1,
+        "multiplicity": 1,
+        "n_electrons": 82,
+        "min_interatomic_dist_ang": 0.968401
+      },
+      "Int_tet": {
+        "n_atoms": 21,
+        "formula": "C5H11O5-",
+        "charge": -1,
+        "multiplicity": 1,
+        "n_electrons": 82,
+        "min_interatomic_dist_ang": 0.968401
+      },
+      "P": {
+        "n_atoms": 21,
+        "formula": "C5H11O5-",
+        "charge": -1,
+        "multiplicity": 1,
+        "n_electrons": 82,
+        "min_interatomic_dist_ang": 0.968401
+      }
+    },
+    "n_atoms": 21,
+    "formula": "C5H11O5-",
+    "element_counts": {
+      "C": 5,
+      "O": 5,
+      "H": 11
+    }
+  }
+}

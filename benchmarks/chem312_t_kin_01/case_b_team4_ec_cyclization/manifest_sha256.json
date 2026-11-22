@@ -1,0 +1,26 @@
+{
+  "schema_version": "cochem.provenance-manifest/1",
+  "case_name": "team4_ec_cyclization",
+  "files_sha256": {
+    "dft_stage.json": "c3983ae6df9ad65d71529681ff4da81c2be43f530d98dac9f5d39ce71201ec40",
+    "geometries/Int_tet.xyz": "4956a687f34ff8be4ae8d765c8d5b9cb66f01e7c939157b1529d90681b9db5cd",
+    "geometries/P.xyz": "af7603b75557dbc8a210f79919ca4f077ad2c62485923aea86a018fdf7329c23",
+    "geometries/R.xyz": "535d3b725162ed1aed7a5463f97a722dcfca7845cdbc359768b57471d40f6ea0",
+    "geometries/TS1.xyz": "3c733ed6a853c1af00739e98825c2a00354a5d3764fa254e1fb0eda6bd70bc3b",
+    "geometries/TS2.xyz": "29b9785c666017a91bf19a5497a8ac660b8e5788209426731278227c553cd991",
+    "inputs/Int_tet.xyz": "e0f2630f699fdb6118caec4d5fd58f0a53cfbc150512ff32e62157b141ece185",
+    "inputs/P.xyz": "2a5d34823ccfcefdb706be720e741a41b19d300ccdf82e5b48ecfd93479d9338",
+    "inputs/R.xyz": "d2e36cf3c102b03c78f0f3de90465db6158a447b8949127e05a7ff6f011093d5",
+    "inputs/TS1.xyz": "1772d337613282b198f9b0efea476e7317001bc8c9c87934df3e706a5015613f",
+    "inputs/TS2.xyz": "35ebf081482ff8a37be0953b6a2b45e159c364de7870477e1e50b6aa7acf6ed2",
+    "mlff_geometries/Int_tet.xyz": "ad844d4dd248c7ea59d3c53ec098745bf45b67537e0780e5268aeb32e1fa8365",
+    "mlff_geometries/P.xyz": "a7fdd8efca59b361689b11fef7a90397751b7f5014d17974fae667f87a369129",
+    "mlff_geometries/R.xyz": "2c42ef7dc41e6ab41dd1d534c2505d3cd0b015e481472d7c304c5488d7bea089",
+    "mlff_geometries/TS1.xyz": "78d8e4bf39ebc5ca1cd7f23fdee40df68245c98f5ab25cc76e35b4620e26671c",
+    "mlff_geometries/TS2.xyz": "e5904453a6ff2539cf1b78f161861583622b60760dfa1b617d8be4f65d9d850f",
+    "mlff_stage.json": "a3a6c065dee69788ba54f57a788b80d64b47df94cac983952c562fadcf3ea34e",
+    "results.json": "bd1528b4c1d990e883fb5179ca747ab357851bde1b4c09260f428f65f75b0b61",
+    "stationary_table.csv": "068763583818bd1f80bad246c6966835bd331aea6c14192a2645446e49693438",
+    "stationary_table.md": "c0495fa2c2138ba3842fd8cfe3846df0372b2a9b3cb1746786cf6e72b2abb589"
+  }
+}

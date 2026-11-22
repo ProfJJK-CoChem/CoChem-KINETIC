@@ -4,23 +4,34 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cochem-kinetic"
-version = "4.0.0"
-description = "CoChem-KINETIC: Thermochemistry, Tunneling, Reaction Kinetics and IRC Engine"
+version = "5.0.0"
+description = "CoChem-KINETIC: Charge-Aware Reaction Profiles, Thermochemistry, Tunneling, RRKM & IRC Engine"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.20.0",
     "scipy>=1.7.0",
-    "h5py>=3.0.0"
+    "h5py>=3.0.0",
 ]
 
 [project.optional-dependencies]
+aimnet = ["aimnet>=0.2.0", "ase>=3.22.0"]
+dft = ["pyscf>=2.6.0", "pyscf-dispersion>=1.0.0"]
+ts = ["sella>=2.3.0"]
 jax = ["jax>=0.4.0", "jaxlib>=0.4.0"]
 mace = ["mace-torch>=0.3.0", "ase>=3.22.0"]
 viz = ["py3Dmol>=2.0.0"]
 
+[project.scripts]
+cochem-kinetic = "cochem_kinetic.cli:main"
+
+[project.entry-points."cochem.modules"]
+kinetic = "cochem_kinetic.provider:kinetic_provider"
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["cochem_kinetic*", "kinetic_core*"]
+exclude = ["tests*", "benchmarks*", "notebooks*"]
 
 [tool.ruff]
 line-length = 88
@@ -36,3 +47,7 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
