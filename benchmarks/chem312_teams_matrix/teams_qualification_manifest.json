@@ -1,0 +1,507 @@
+{
+  "schema_version": "cochem-kinetic-chem312-teams-matrix/1.0",
+  "course": "CHEM 312 Spring 2027",
+  "institution": "Tennessee Tech University",
+  "aimnet2_environment": {
+    "python": "/home/ansac/.venvs/aimnet/bin/python",
+    "aimnet_version": "0.2.5",
+    "ase_version": "3.29.0",
+    "torch_version": "2.13.0+cu129",
+    "cuda_available": true,
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "model": "aimnet2",
+    "fmax_threshold_ev_ang": 0.02
+  },
+  "elements_qualified": [
+    "C",
+    "H",
+    "D",
+    "O",
+    "F",
+    "S"
+  ],
+  "charges_qualified": [
+    -1,
+    0
+  ],
+  "teams": {
+    "team1_propargyl_formate": {
+      "team": "Team 1",
+      "family": "Family A (Neutral Formate, CH3SO3H proton shuttle)",
+      "dft_ts_irc_status": "VERIFIED",
+      "verified_benchmark_link": "benchmarks/chem312_t_kin_01/case_a_team1_formate",
+      "monomer": {
+        "spec": "team1_propargyl_formate_monomer",
+        "formula": "C4H4O2",
+        "n_atoms": 10,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team1_propargyl_formate/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -8310.47061035165,
+          "energy_ha": -305.40416189112494,
+          "fmax_ev_ang": 0.009505346762474614,
+          "frms_ev_ang": 0.0047749172134989755,
+          "opt_steps": 92,
+          "wall_seconds": 1.8315,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team1_propargyl_formate",
+        "formula": "C5H10O6S",
+        "n_atoms": 22,
+        "charge": 0,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "TS1",
+          "Int_tet",
+          "TS2",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team1_propargyl_formate/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -28477.790833807343,
+            "energy_ha": -1046.5395102025007,
+            "fmax_ev_ang": 0.0009552454135267131,
+            "frms_ev_ang": 0.0006249657284738392,
+            "opt_steps": 0,
+            "wall_seconds": 0.0325,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team1_propargyl_formate/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -28477.472798507515,
+            "energy_ha": -1046.527822620804,
+            "fmax_ev_ang": 0.0008983850954464822,
+            "frms_ev_ang": 0.0005860706674589475,
+            "opt_steps": 0,
+            "wall_seconds": 0.0142,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": 7.3341
+      }
+    },
+    "team2_difluoroethyl_formate": {
+      "team": "Team 2",
+      "family": "Family A (Fluorinated Neutral Formate, CH3SO3H proton shuttle)",
+      "dft_ts_irc_status": "PENDING_STUDENT_RUN",
+      "monomer": {
+        "spec": "team2_difluoroethyl_formate_monomer",
+        "formula": "C3H4F2O2",
+        "n_atoms": 11,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team2_difluoroethyl_formate/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -12711.945634847603,
+          "energy_ha": -467.1553856144257,
+          "fmax_ev_ang": 0.006410404243830917,
+          "frms_ev_ang": 0.004466795291841556,
+          "opt_steps": 73,
+          "wall_seconds": 0.7472,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team2_difluoroethyl_formate",
+        "formula": "C4H10F2O6S",
+        "n_atoms": 23,
+        "charge": 0,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team2_difluoroethyl_formate/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -32879.164441158864,
+            "energy_ha": -1208.2870069144865,
+            "fmax_ev_ang": 0.009424355782211537,
+            "frms_ev_ang": 0.006164613222169732,
+            "opt_steps": 174,
+            "wall_seconds": 1.8193,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team2_difluoroethyl_formate/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -32878.91640216981,
+            "energy_ha": -1208.2778916497655,
+            "fmax_ev_ang": 0.00843018772690441,
+            "frms_ev_ang": 0.004665901320577705,
+            "opt_steps": 153,
+            "wall_seconds": 1.5785,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": 5.7199
+      }
+    },
+    "team3_trifluoroethyl_formate": {
+      "team": "Team 3",
+      "family": "Family A (Trifluorinated Neutral Formate, CH3SO3H proton shuttle)",
+      "dft_ts_irc_status": "PENDING_STUDENT_RUN",
+      "monomer": {
+        "spec": "team3_trifluoroethyl_formate_monomer",
+        "formula": "C3H3F3O2",
+        "n_atoms": 11,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team3_trifluoroethyl_formate/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -15414.455516053176,
+          "energy_ha": -566.4707919217404,
+          "fmax_ev_ang": 0.009929276872336194,
+          "frms_ev_ang": 0.0056117703529560935,
+          "opt_steps": 66,
+          "wall_seconds": 0.6854,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team3_trifluoroethyl_formate",
+        "formula": "C4H9F3O6S",
+        "n_atoms": 23,
+        "charge": 0,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team3_trifluoroethyl_formate/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -35581.849579058595,
+            "energy_ha": -1307.6088537865182,
+            "fmax_ev_ang": 0.009957110484161986,
+            "frms_ev_ang": 0.005505073582147149,
+            "opt_steps": 79,
+            "wall_seconds": 0.8503,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team3_trifluoroethyl_formate/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -35581.4355352089,
+            "energy_ha": -1307.5936379556908,
+            "fmax_ev_ang": 0.009144860400625756,
+            "frms_ev_ang": 0.005848118392864954,
+            "opt_steps": 124,
+            "wall_seconds": 1.3812,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": 9.5481
+      }
+    },
+    "team4_ethylene_carbonate": {
+      "team": "Team 4",
+      "family": "Family B (Anionic Cyclic Carbonate, 5-exo-trig Cyclization)",
+      "dft_ts_irc_status": "VERIFIED",
+      "verified_benchmark_link": "benchmarks/chem312_t_kin_01/case_b_team4_ec_cyclization",
+      "monomer": {
+        "spec": "team4_ec_monomer",
+        "formula": "C3H4O3",
+        "n_atoms": 10,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team4_ethylene_carbonate/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -9323.516765328019,
+          "energy_ha": -342.63292141916,
+          "fmax_ev_ang": 0.00781565004614168,
+          "frms_ev_ang": 0.005518130546676346,
+          "opt_steps": 37,
+          "wall_seconds": 0.3974,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team4_ec_cyclization",
+        "formula": "C4H7O4-",
+        "n_atoms": 15,
+        "charge": -1,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "TS1",
+          "Int_tet",
+          "TS2",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team4_ethylene_carbonate/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -12458.272966790597,
+            "energy_ha": -457.8330870088408,
+            "fmax_ev_ang": 0.0004601507165985941,
+            "frms_ev_ang": 0.00024915394820656503,
+            "opt_steps": 0,
+            "wall_seconds": 0.0226,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team4_ethylene_carbonate/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -12458.667870794636,
+            "energy_ha": -457.84759946331366,
+            "fmax_ev_ang": 0.0007166171707353015,
+            "frms_ev_ang": 0.0005222673645251992,
+            "opt_steps": 0,
+            "wall_seconds": 0.0148,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": -9.1067
+      },
+      "intermolecular_21atom": {
+        "spec": "team4_diol_dmc_intermolecular",
+        "formula": "C5H11O5-",
+        "n_atoms": 21,
+        "charge": -1,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team4_ethylene_carbonate/intermolecular_21atom/R.xyz",
+          "aimnet2": {
+            "energy_ev": -15609.719406881279,
+            "energy_ha": -573.6466075550543,
+            "fmax_ev_ang": 0.00880160871705501,
+            "frms_ev_ang": 0.0049703425579216845,
+            "opt_steps": 85,
+            "wall_seconds": 0.8995,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team4_ethylene_carbonate/intermolecular_21atom/P.xyz",
+          "aimnet2": {
+            "energy_ev": -15610.391972463154,
+            "energy_ha": -573.6713238843068,
+            "fmax_ev_ang": 0.009742254736738844,
+            "frms_ev_ang": 0.004737358085245279,
+            "opt_steps": 261,
+            "wall_seconds": 2.9152,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": -15.5097
+      }
+    },
+    "team5_propylene_carbonate": {
+      "team": "Team 5",
+      "family": "Family B (Anionic Chiral Cyclic Carbonate, 5-exo-trig Cyclization)",
+      "dft_ts_irc_status": "PENDING_STUDENT_RUN",
+      "monomer": {
+        "spec": "team5_pc_monomer",
+        "formula": "C4H6O3",
+        "n_atoms": 13,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team5_propylene_carbonate/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -10394.181164263682,
+          "energy_ha": -381.97911235765076,
+          "fmax_ev_ang": 0.00887003442782277,
+          "frms_ev_ang": 0.006112612341926274,
+          "opt_steps": 56,
+          "wall_seconds": 0.5909,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team5_pc_cyclization",
+        "formula": "C5H9O4-",
+        "n_atoms": 18,
+        "charge": -1,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team5_propylene_carbonate/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -13528.910496336017,
+            "energy_ha": -497.1782905154528,
+            "fmax_ev_ang": 0.00988206465139196,
+            "frms_ev_ang": 0.006617673314533042,
+            "opt_steps": 36,
+            "wall_seconds": 0.3754,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team5_propylene_carbonate/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -13529.428107685386,
+            "energy_ha": -497.1973123816925,
+            "fmax_ev_ang": 0.007988420810121636,
+            "frms_ev_ang": 0.004944728283905308,
+            "opt_steps": 163,
+            "wall_seconds": 1.7133,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": -11.9364
+      },
+      "intermolecular_24atom": {
+        "spec": "team5_diol_dmc_intermolecular",
+        "formula": "C6H13O5-",
+        "n_atoms": 24,
+        "charge": -1,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team5_propylene_carbonate/intermolecular_24atom/R.xyz",
+          "aimnet2": {
+            "energy_ev": -16680.426952054055,
+            "energy_ha": -612.9943840885132,
+            "fmax_ev_ang": 0.009166201118416055,
+            "frms_ev_ang": 0.006001052539574642,
+            "opt_steps": 94,
+            "wall_seconds": 1.0379,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team5_propylene_carbonate/intermolecular_24atom/P.xyz",
+          "aimnet2": {
+            "energy_ev": -16681.21814569697,
+            "energy_ha": -613.0234599186001,
+            "fmax_ev_ang": 0.008856818350377244,
+            "frms_ev_ang": 0.004977389542001006,
+            "opt_steps": 295,
+            "wall_seconds": 3.124,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": -18.2454
+      }
+    },
+    "team6_emc_d4ec": {
+      "team": "Team 6",
+      "family": "Family B (Anionic Open Carbonate Transesterification + Weeks 6-8 d4-EC Isotopologue)",
+      "dft_ts_irc_status": "PENDING_STUDENT_RUN",
+      "monomer": {
+        "spec": "team6_emc_monomer",
+        "formula": "C4H8O3",
+        "n_atoms": 15,
+        "charge": 0,
+        "multiplicity": 1,
+        "xyz_path": "team6_emc_d4ec/monomer/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -10426.725504058037,
+          "energy_ha": -383.1750947857475,
+          "fmax_ev_ang": 0.007902646803197286,
+          "frms_ev_ang": 0.004445025282587722,
+          "opt_steps": 42,
+          "wall_seconds": 0.4354,
+          "converged": true
+        }
+      },
+      "week10": {
+        "spec": "team6_emc_transesterification",
+        "formula": "C5H11O4-",
+        "n_atoms": 20,
+        "charge": -1,
+        "multiplicity": 1,
+        "states_staged": [
+          "R",
+          "P"
+        ],
+        "R": {
+          "xyz_path": "team6_emc_d4ec/week10/R.xyz",
+          "aimnet2": {
+            "energy_ev": -13561.514939426375,
+            "energy_ha": -498.37648169893816,
+            "fmax_ev_ang": 0.006595245390461404,
+            "frms_ev_ang": 0.0039908852821236625,
+            "opt_steps": 81,
+            "wall_seconds": 0.8487,
+            "converged": true
+          }
+        },
+        "P": {
+          "xyz_path": "team6_emc_d4ec/week10/P.xyz",
+          "aimnet2": {
+            "energy_ev": -13561.456773975655,
+            "energy_ha": -498.3743441580501,
+            "fmax_ev_ang": 0.008550516466315463,
+            "frms_ev_ang": 0.0053296304751003,
+            "opt_steps": 219,
+            "wall_seconds": 2.2535,
+            "converged": true
+          }
+        },
+        "delta_e_aimnet2_kcal": 1.3413
+      },
+      "d4_ec_isotopologue": {
+        "spec": "team6_d4_ec_isotopologue",
+        "formula": "C3D4O3",
+        "n_atoms": 10,
+        "charge": 0,
+        "multiplicity": 1,
+        "deuterium_mass_amu": 2.01410177812,
+        "born_oppenheimer_delta_e_ev": 0.0,
+        "xyz_path": "team6_emc_d4ec/d4_ec_isotopologue/monomer.xyz",
+        "aimnet2": {
+          "energy_ev": -9323.516765328019,
+          "energy_ha": -342.63292141916,
+          "fmax_ev_ang": 0.00781565004614168,
+          "frms_ev_ang": 0.005518130546676346,
+          "opt_steps": 0,
+          "wall_seconds": 0.0146,
+          "converged": true
+        }
+      }
+    }
+  },
+  "files_sha256": {
+    "team1_propargyl_formate/monomer/monomer.xyz": "781ef16e0d8c0d3178f70b448e4a0c9da00efc306e19e5dd3d167efa40b921c2",
+    "team1_propargyl_formate/week10/Int_tet.xyz": "b6d4c2978c3d6de9f28c7367dd3770551f65f55c0fd2efa8547d9debad2b1a6c",
+    "team1_propargyl_formate/week10/P.xyz": "4683e07f419b68b057ffb2f35f1f92f48b539a5f68313f42a87b290e805d5a82",
+    "team1_propargyl_formate/week10/R.xyz": "16169e1e847d74034d2d7f37ef05426dd8db0fbe65abe24b8b0c6ab63baaba2d",
+    "team1_propargyl_formate/week10/TS1.xyz": "42c63bdcb3b5021b77f2a46629e97ca8553b0fa943633beb085b388fc8e09680",
+    "team1_propargyl_formate/week10/TS2.xyz": "2eb81012378cc17c2f5e35d8960fe75d53804828b3a2e5848c1b0c875b489246",
+    "team2_difluoroethyl_formate/monomer/monomer.xyz": "2be8d5310a865d9d79aeff9903acd0be66f73a50998aeb08037163ef56e53661",
+    "team2_difluoroethyl_formate/week10/P.xyz": "de4b9295cf220a696466833d5a2ad1bebf8d1b32d0b221e5a5b2b2b2c8fb40d5",
+    "team2_difluoroethyl_formate/week10/R.xyz": "f05a17afeb3b612a0d2abf2c9c2cf97b59daac5cdab78e75e3f7429bb6bab73d",
+    "team3_trifluoroethyl_formate/monomer/monomer.xyz": "06cf92dec3e2a0040e501e7543ff88a004ac74488b6dd2954e5f66f9e7e6364b",
+    "team3_trifluoroethyl_formate/week10/P.xyz": "24c70ac53152848b3724fc56c45e0ca2e6622fb4381d756751c223f10ca3060a",
+    "team3_trifluoroethyl_formate/week10/R.xyz": "aaf9c1d9706bff4cba395e767e8efeeb4b3e3e94151399f82bdd9826a03ad1ae",
+    "team4_ethylene_carbonate/intermolecular_21atom/P.xyz": "2dc0413d4b35eac3bf4b2f399cb69da1a01acb36a4ef9bef79597b9ed330320e",
+    "team4_ethylene_carbonate/intermolecular_21atom/R.xyz": "8dccfcbe96f2b0055e98d14d0c69a66045c4a19a85792dc9022a84044be6c58f",
+    "team4_ethylene_carbonate/monomer/monomer.xyz": "d134dc6ff8d59cfdfbf42cb5af9fddea8124afb2e04f11a0abfe72636971b416",
+    "team4_ethylene_carbonate/week10/Int_tet.xyz": "4956a687f34ff8be4ae8d765c8d5b9cb66f01e7c939157b1529d90681b9db5cd",
+    "team4_ethylene_carbonate/week10/P.xyz": "af7603b75557dbc8a210f79919ca4f077ad2c62485923aea86a018fdf7329c23",
+    "team4_ethylene_carbonate/week10/R.xyz": "535d3b725162ed1aed7a5463f97a722dcfca7845cdbc359768b57471d40f6ea0",
+    "team4_ethylene_carbonate/week10/TS1.xyz": "3c733ed6a853c1af00739e98825c2a00354a5d3764fa254e1fb0eda6bd70bc3b",
+    "team4_ethylene_carbonate/week10/TS2.xyz": "29b9785c666017a91bf19a5497a8ac660b8e5788209426731278227c553cd991",
+    "team5_propylene_carbonate/intermolecular_24atom/P.xyz": "37d6833d3dec00254d1ad3b170908e4fa19e3b2874ef84704a79f496997a198c",
+    "team5_propylene_carbonate/intermolecular_24atom/R.xyz": "19d3d8464b32abc54cfb3ca6e376034c9f59677fb2cf6c05bf872c3508ee4b98",
+    "team5_propylene_carbonate/monomer/monomer.xyz": "ea607d72ffe45a0fbaafbd71bbf966c813bf8b2edcd32cd30b72157cf6df7891",
+    "team5_propylene_carbonate/week10/P.xyz": "c78584db111fbe7f68e529370456764981b7b2cf3eeeec952a6ad7b37c2fe2c4",
+    "team5_propylene_carbonate/week10/R.xyz": "115ce2b682f3a4eb8ab2d2e1f833596c3289375b6435fd1900dc665feec6676e",
+    "team6_emc_d4ec/d4_ec_isotopologue/monomer.xyz": "aee3995f5acee6ad8fd4155b340fa46df9e462f3701eddc66eb9b1ec5a90a0f7",
+    "team6_emc_d4ec/monomer/monomer.xyz": "7599e429aab3b811e3a76de837ba8f2d15a10e84c2fc919da03b01d755049c61",
+    "team6_emc_d4ec/week10/P.xyz": "9ec594e59c4334811b4bff0327e7be6fc0e5f0743e7fd81550b7d90649e46fdc",
+    "team6_emc_d4ec/week10/R.xyz": "eeb17d1891a1994007f7f6ac66f1a3a4011125b45e14c00ca9c738ebf7f14fe7"
+  }
+}

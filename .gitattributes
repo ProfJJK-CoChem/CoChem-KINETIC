@@ -1,0 +1,2 @@
+benchmarks/** text eol=lf
+benchmarks/**/*.csv text eol=crlf

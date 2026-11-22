@@ -45,9 +45,17 @@ from cochem_kinetic.rxn_profile import (
 logger = logging.getLogger("cochem_kinetic.cli")
 
 
-def _load_input_geometries(input_dir: Path, required_states: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+def _load_input_geometries(
+    input_dir: Path,
+    required_states: tuple[str, ...],
+    candidate_states: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
     loaded: dict[str, dict[str, Any]] = {}
-    for st in STATIONARY_STATES:
+    search_order: list[str] = list(candidate_states if candidate_states is not None else STATIONARY_STATES)
+    for st in required_states:
+        if st not in search_order:
+            search_order.append(st)
+    for st in search_order:
         p = input_dir / f"{st}.xyz"
         if p.is_file():
             syms, coords, comment = read_xyz(p)
@@ -298,7 +306,21 @@ def _cmd_validate_stoich(args: argparse.Namespace) -> int:
     mult = args.multiplicity if args.multiplicity is not None else (spec["multiplicity"] if spec else 1)
     expected_formula = args.expected_formula or (spec["formula"] if spec else None)
 
-    loaded = _load_input_geometries(input_dir, required_states=STATIONARY_STATES)
+    if args.states:
+        required_states = tuple(args.states)
+        candidate_states = required_states
+    elif spec is not None and "required_states" in spec:
+        required_states = tuple(spec["required_states"])
+        candidate_states = tuple(spec.get("stationary_states", required_states))
+    else:
+        required_states = STATIONARY_STATES
+        candidate_states = STATIONARY_STATES
+
+    loaded = _load_input_geometries(
+        input_dir,
+        required_states=required_states,
+        candidate_states=candidate_states,
+    )
     report = validate_stationary_stoichiometry(
         loaded,
         expected_charge=charge,
@@ -407,12 +429,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_list = sub.add_parser("list-specs", help="List built-in CHEM 312 reaction specifications.")
     p_list.set_defaults(func=_cmd_list_specs)
 
-    p_val = sub.add_parser("validate-stoich", help="Validate atom/charge/spin balance across 5 stationary XYZ files.")
-    p_val.add_argument("--input-dir", required=True, help="Directory containing R.xyz, TS1.xyz, Int_tet.xyz, TS2.xyz, P.xyz")
+    p_val = sub.add_parser("validate-stoich", help="Validate atom/charge/spin balance across stationary or monomer XYZ files.")
+    p_val.add_argument("--input-dir", required=True, help="Directory containing XYZ files (e.g. R.xyz/P.xyz, 5-state set, or monomer.xyz)")
     p_val.add_argument("--spec", choices=list_builtin_specs(), default=None)
     p_val.add_argument("--charge", type=int, default=None)
     p_val.add_argument("--multiplicity", type=int, default=None)
     p_val.add_argument("--expected-formula", type=str, default=None)
+    p_val.add_argument("--states", nargs="+", default=None, help="Explicit state basenames to validate (e.g. --states R P or --states monomer)")
     p_val.add_argument("--allow-reordered", action="store_true")
     p_val.set_defaults(func=_cmd_validate_stoich)
 
