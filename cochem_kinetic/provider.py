@@ -19,7 +19,11 @@ from cochem_kinetic.chem312_specs import (
     validate_stationary_stoichiometry,
 )
 from cochem_kinetic.engine.rrkm_theory import RRKMSolver
-from cochem_kinetic.rxn_profile import compute_rrho_thermochemistry
+from cochem_kinetic.rxn_profile import (
+    ALL_CANDIDATE_STATES,
+    compute_rrho_thermochemistry,
+    load_reaction_inputs,
+)
 from kinetic_core.thermo import apply_implicit_solvation_correction, calculate_eyring_rate
 
 SUPPORTED_OPERATIONS: list[str] = [
@@ -79,12 +83,11 @@ def execute_handoff(
         mult = int(params.get("multiplicity", spec["multiplicity"] if spec else 1))
         expected_formula = params.get("expected_formula", spec["formula"] if spec else None)
         input_dir = Path(params["input_dir"])
-        loaded: dict[str, dict[str, Any]] = {}
-        for st in STATIONARY_STATES:
-            p = input_dir / f"{st}.xyz"
-            if p.is_file():
-                syms, coords, _ = read_xyz(p)
-                loaded[st] = {"symbols": syms, "coords": coords}
+        loaded = load_reaction_inputs(
+            input_dir,
+            required_states=(),
+            candidate_states=ALL_CANDIDATE_STATES,
+        )
         result = validate_stationary_stoichiometry(
             loaded,
             expected_charge=charge,
@@ -165,6 +168,10 @@ def execute_handoff(
             cli_args.extend(["--charge", str(params["charge"])])
         if params.get("multiplicity") is not None:
             cli_args.extend(["--multiplicity", str(params["multiplicity"])])
+        if params.get("basis") or params.get("dft_basis"):
+            cli_args.extend(["--basis", str(params.get("basis") or params.get("dft_basis"))])
+        if params.get("pathway_mode"):
+            cli_args.extend(["--pathway-mode", str(params["pathway_mode"])])
         if params.get("aimnet_python"):
             cli_args.extend(["--aimnet-python", str(params["aimnet_python"])])
         if params.get("pyscf_python"):

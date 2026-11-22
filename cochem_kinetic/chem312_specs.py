@@ -42,6 +42,7 @@ from typing import Any
 import numpy as np
 
 STATIONARY_STATES: tuple[str, ...] = ("R", "TS1", "Int_tet", "TS2", "P")
+ELEMENTARY_STATIONARY_STATES: tuple[str, ...] = ("R", "TS", "P")
 
 # Static dielectric constants (298.15 K) for continuum PCM / ddCOSMO solvation
 SOLVENT_DIELECTRICS: dict[str, float] = {
@@ -524,6 +525,31 @@ def write_xyz(
     lines = [str(len(symbols)), comment]
     for sym, xyz in zip(symbols, arr):
         lines.append(f"{sym:<2s} {xyz[0]:16.10f} {xyz[1]:16.10f} {xyz[2]:16.10f}")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def write_multi_xyz(
+    path: str | Path,
+    symbols: list[str],
+    frames: list[np.ndarray] | np.ndarray,
+    comments: list[str] | None = None,
+) -> Path:
+    """Writes a multi-frame XYZ trajectory file with full floating-point precision."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    frame_list = [np.asarray(fr, dtype=np.float64) for fr in frames]
+    if not frame_list:
+        raise ValueError("Cannot write multi-frame XYZ with zero frames.")
+    lines: list[str] = []
+    for idx, arr in enumerate(frame_list):
+        if arr.shape != (len(symbols), 3):
+            raise ValueError(f"Frame {idx} shape {arr.shape} does not match {len(symbols)} symbols.")
+        comment = comments[idx] if (comments is not None and idx < len(comments)) else f"frame {idx}"
+        lines.append(str(len(symbols)))
+        lines.append(comment)
+        for sym, xyz in zip(symbols, arr):
+            lines.append(f"{sym:<2s} {xyz[0]:16.10f} {xyz[1]:16.10f} {xyz[2]:16.10f}")
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p
 
