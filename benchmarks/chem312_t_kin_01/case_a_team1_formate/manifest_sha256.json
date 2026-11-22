@@ -1,0 +1,26 @@
+{
+  "schema_version": "cochem.provenance-manifest/1",
+  "case_name": "team1_propargyl_formate",
+  "files_sha256": {
+    "dft_stage.json": "5d2ca6f50bfb2fd0c6e654982756f536d46ea32cb0131dba14c7a08e4aaa6fbc",
+    "geometries/Int_tet.xyz": "b6d4c2978c3d6de9f28c7367dd3770551f65f55c0fd2efa8547d9debad2b1a6c",
+    "geometries/P.xyz": "4683e07f419b68b057ffb2f35f1f92f48b539a5f68313f42a87b290e805d5a82",
+    "geometries/R.xyz": "16169e1e847d74034d2d7f37ef05426dd8db0fbe65abe24b8b0c6ab63baaba2d",
+    "geometries/TS1.xyz": "42c63bdcb3b5021b77f2a46629e97ca8553b0fa943633beb085b388fc8e09680",
+    "geometries/TS2.xyz": "2eb81012378cc17c2f5e35d8960fe75d53804828b3a2e5848c1b0c875b489246",
+    "inputs/Int_tet.xyz": "cd4631e40c75f570ef4c90339d2de2c3a4cdcc1c168b8dd4173976b51e22861d",
+    "inputs/P.xyz": "1ac4a5379c34b707c863567f4f3d962b7b5da3ec7e9dec45a2a56c65a27e76b8",
+    "inputs/R.xyz": "c0a080b0e1abaae9c2c134a0294ab7ab8c0c335d4f2b06e9fcabdb0b2f8c580c",
+    "inputs/TS1.xyz": "a49c3cdcf26218fd85f5eb0c0edbbe9bf6a39f6a18382c3f8ed4093858eba21d",
+    "inputs/TS2.xyz": "74d65f01150d77542cbe55dc63744bee0efeedb4d5c9b7e5f07542bc63ac1f72",
+    "mlff_geometries/Int_tet.xyz": "185fb1ff8253cda149e12eebda1dccf928c2e68feb87eb42966946bafa2d0bfe",
+    "mlff_geometries/P.xyz": "ecab7f9a474a50cdfbd08f6796fb0dec9dd3380e56b2ab54d4b5d0f5f35fb1a6",
+    "mlff_geometries/R.xyz": "9c4b5d2e248b2ffa2b24cd86d3d6c28ff7f68587594018517391228af3077e5d",
+    "mlff_geometries/TS1.xyz": "e039126258b8b922a6e82f434e2bc1107057d7ee1d3ab31ce5ae19a2d8c07c9a",
+    "mlff_geometries/TS2.xyz": "aaabc61464f04bfc3c52d0b195f50bc5768e9a6aa77847446765a0d2dab40438",
+    "mlff_stage.json": "5690c2317385541f64188e5cfe9d31bbe52ba3ebe1d51638ab0db465f6dce55c",
+    "results.json": "1467538bf4bcc210c0a7836488b1925250a282863faf67da02efead709f6d18c",
+    "stationary_table.csv": "9036dbfb1d0a13380808fa5cf1533cfaea47de83b54a954d8efe55d457264989",
+    "stationary_table.md": "cc1052f1bfdb0b588547ac88707ebf53016f2486449e4ddb053a63f0a73ee8bb"
+  }
+}

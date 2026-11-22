@@ -227,12 +227,18 @@ class TestMACEPreOptimizerStress:
     def test_fmax_floor_guard(self) -> None:
         pre_opt = MACEPreOptimizer()
         # Ensure fmax passed as 1e-6 is guarded to max(1e-6, 1e-3) = 1e-3
+        assert pre_opt.guard_fmax(1e-6) == 1e-3
+        assert pre_opt.guard_fmax(0.05) == 0.05
+
         syms = ["O", "H", "H"]
         coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
-        
-        rel_coords, e = pre_opt.pre_relax_geometry(syms, coords, max_steps=2, fmax=1e-6)
-        assert rel_coords.shape == (3, 3)
-        assert isinstance(e, float)
+        if pre_opt.calculator is not None:
+            rel_coords, e = pre_opt.pre_relax_geometry(syms, coords, max_steps=2, fmax=1e-6)
+            assert rel_coords.shape == (3, 3)
+            assert isinstance(e, float)
+        else:
+            with pytest.raises(RuntimeError):
+                pre_opt.pre_relax_geometry(syms, coords, max_steps=2, fmax=1e-6)
 
     def test_absence_of_pairwise_lennard_jones_potential_formulas(self) -> None:
         """

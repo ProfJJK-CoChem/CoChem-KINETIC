@@ -112,41 +112,112 @@ def test_hindered_rotors_and_solvation() -> None:
     delta_g_hindered = pitzer_gwinn_hindered_rotor_correction(freq_cm1=50.0, barrier_kcal=2.5, temp=298.15)
     assert isinstance(delta_g_hindered, float)
 
-    # KINETIC-19: Implicit solvation (Deprecated)
-    import pytest
-    with pytest.raises(NotImplementedError):
-        apply_implicit_solvation_correction(delta_g_gas=12.0, delta_g_solv_ts=-3.0, delta_g_solv_reactants=-1.0)
+    # KINETIC-19: Phase-aware implicit solvation API
+    dg_pcm = apply_implicit_solvation_correction(
+        delta_g_gas=12.0,
+        solvent_name="acetonitrile",
+        delta_g_solv_ts=-3.0,
+        delta_g_solv_reactants=-1.0,
+        phase="pcm",
+        gas_phase_ftmw_lock=False,
+    )
+    assert np.isclose(dg_pcm, 10.0)
+
+    dg_gas = apply_implicit_solvation_correction(
+        delta_g_gas=12.0,
+        solvent_name="acetonitrile",
+        delta_g_solv_ts=-3.0,
+        delta_g_solv_reactants=-1.0,
+        phase="gas",
+        gas_phase_ftmw_lock=True,
+    )
+    assert np.isclose(dg_gas, 12.0)
+
+    with pytest.raises(RuntimeError, match="ERR_DOMAIN_VIOLATION"):
+        apply_implicit_solvation_correction(
+            delta_g_gas=12.0,
+            solvent_name="acetonitrile",
+            delta_g_solv_ts=-3.0,
+            delta_g_solv_reactants=-1.0,
+            phase="pcm",
+            gas_phase_ftmw_lock=True,
+        )
+
+
+def _diatomic_double_well_potential(img: np.ndarray) -> tuple[float, np.ndarray]:
+    """
+    Translationally invariant 2-atom double-well potential V(r) = (r - 1.0)^2 * (r - 2.0)^2
+    with barrier at r = 1.5 A and minima at r = 1.0 A and r = 2.0 A.
+    """
+    coords = np.asarray(img, dtype=np.float64)
+    vec = coords[1] - coords[0]
+    r = float(np.linalg.norm(vec))
+    u = r - 1.5
+    val = float((u * u - 0.25) ** 2)
+    dv_dr = 4.0 * u * (u * u - 0.25)
+    grad = np.zeros_like(coords)
+    if r > 1e-12:
+        unit = vec / r
+        grad[1] = dv_dr * unit
+        grad[0] = -dv_dr * unit
+    return val, grad
 
 
 def test_cineb_mace_aimd_and_irc() -> None:
-    # KINETIC-07: JAX CI-NEB
-    neb = JACXCINEBEngine()
-    images = np.array([[[0.0,0.0,0.0]], [[0.5,0.0,0.0]], [[1.0,0.0,0.0]]])
-    def physical_eval_fn(img) -> Any:
-        import numpy as np
-        centroid = np.mean(img, axis=0)
-        centered = img - centroid
-        val = float(np.sum(centered**2))
-        grad = 2.0 * centered
-        return val, grad
+    # KINETIC-07: Non-degenerate multi-atom (2-atom) JAX CI-NEB on a real double-well PES
+    neb = JACXCINEBEngine(k_spring=0.2)
+    r_vals = np.linspace(1.0, 2.0, 5)
+    images = np.array([[[0.0, 0.0, 0.0], [0.0, 0.0, float(r)]] for r in r_vals], dtype=np.float64)
 
-    opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=2)
-    assert len(opt_img) == 3
+    opt_img, opt_e = neb.optimize_path(images, _diatomic_double_well_potential, max_iter=10)
+    assert len(opt_img) == 5
+    assert np.asarray(opt_img).shape == (5, 2, 3)
+    assert float(np.max(opt_e)) > float(opt_e[0]) and float(np.max(opt_e)) > float(opt_e[-1])
 
-    # KINETIC-08: MACE Pre-optimizer fallback
-    mace_opt = MACEPreOptimizer()
-    rel_coords, e = mace_opt.pre_relax_geometry(["O", "H", "H"], np.array([[0,0,0],[0,0.7,-0.4],[0,-0.7,-0.4]]), max_steps=2)
-    assert len(rel_coords) == 3
+    # KINETIC-08: MACE/MLFF Pre-optimizer raises explicit RuntimeError when backend absent (no silent EMT)
+    mace_opt_unavail = MACEPreOptimizer(backend="mace", charge=-1, multiplicity=1)
+    assert mace_opt_unavail.calculator is None
+    with pytest.raises(RuntimeError, match="silent EMT"):
+        mace_opt_unavail.pre_relax_geometry(
+            ["O", "H", "H"],
+            np.array([[0.0, 0.0, 0.0], [0.0, 0.7, -0.4], [0.0, -0.7, -0.4]]),
+            max_steps=2,
+        )
 
-    # KINETIC-09: AIMD Nose-Hoover
+    # KINETIC-09: AIMD Nose-Hoover with analytical harmonic Fe-O restoring force
+    def _harmonic_feo_force(coords: np.ndarray) -> np.ndarray:
+        vec = coords[1] - coords[0]
+        r = float(np.linalg.norm(vec))
+        f = np.zeros_like(coords, dtype=np.float64)
+        if r > 1e-12:
+            k_bond = 5.0
+            r_eq = 1.62
+            unit = vec / r
+            f[1] = -k_bond * (r - r_eq) * unit
+            f[0] = k_bond * (r - r_eq) * unit
+        return f
+
     sampler = NoseHooverAIMDSampler()
-    traj = sampler.sample_nvt_trajectory(["Fe", "O"], np.array([[0,0,0],[0,0,1.2]]), np.array([55.8, 16.0]), n_steps=3)
+    traj = sampler.sample_nvt_trajectory(
+        ["Fe", "O"],
+        np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.55]], dtype=np.float64),
+        np.array([55.845, 15.999], dtype=np.float64),
+        n_steps=3,
+        force_fn=_harmonic_feo_force,
+    )
     assert len(traj) == 4
 
-    # KINETIC-12: IRC Tracer
-    tracer = IRCTracerEngine()
-    path, energies = tracer.trace_irc_path(np.array([[0,0,0],[0,0,1]]), np.array([16.0, 1.0]), np.array([[0,0,1],[0,0,-1]]), physical_eval_fn, max_steps=2)
-    assert len(path) > 0
+    # KINETIC-12: IRC Tracer with exact M^{-1/2} mass-weighting on asymmetric m=[12, 1] diatomic
+    tracer = IRCTracerEngine(step_size_amu_ang=0.05, grad_tol=1e-4)
+    ts_coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.5]], dtype=np.float64)
+    masses = np.array([12.0, 1.0], dtype=np.float64)
+    imag_mode = np.array([[0.0, 0.0, -1.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    path, energies = tracer.trace_irc_path(
+        ts_coords, masses, imag_mode, _diatomic_double_well_potential, max_steps=15
+    )
+    assert len(path) >= 3
+    assert float(np.max(energies)) >= float(energies[0])
+    assert float(np.max(energies)) >= float(energies[-1])
 
 
 def test_dispatcher_and_viz(tmp_path) -> None:
@@ -220,6 +291,7 @@ def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard() -> None:
     mace_opt = MACEPreOptimizer()
     assert hasattr(mace_opt, "FLOAT32_NOISE_FLOOR")
     assert mace_opt.FLOAT32_NOISE_FLOOR == 1e-5
+    assert mace_opt.guard_fmax(1e-6) == 1e-3
 
     # Test noise guard logic
     prev_g = np.array([[0.0001, 0.0, 0.0]])
@@ -228,11 +300,15 @@ def test_kinetic_02_mace_pre_opt_gfn2_and_float32_guard() -> None:
     triggered = mace_opt.apply_float32_noise_guard(prev_g, curr_g, prev_energy=-10.0, curr_energy=-10.0000001)
     assert triggered is True
 
-    # Test relaxation without pairwise LJ
+    # Test real MLFF relaxation if a genuine backend (AIMNet2/MACE) is installed; otherwise must raise RuntimeError
     coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.75, -0.47], [0.0, -0.75, -0.47]])
-    opt_c, e = mace_opt.pre_relax_geometry(["O", "H", "H"], coords, max_steps=5, fmax=0.05)
-    assert opt_c.shape == (3, 3)
-    assert isinstance(e, float)
+    if mace_opt.calculator is not None:
+        opt_c, e = mace_opt.pre_relax_geometry(["O", "H", "H"], coords, max_steps=5, fmax=0.05)
+        assert opt_c.shape == (3, 3)
+        assert isinstance(e, float)
+    else:
+        with pytest.raises(RuntimeError):
+            mace_opt.pre_relax_geometry(["O", "H", "H"], coords, max_steps=5, fmax=0.05)
 
 
 def test_kinetic_03_dispatcher_v4_budgets_and_d1_d5_rules(tmp_path) -> None:
@@ -293,25 +369,21 @@ def test_kinetic_04_cineb_pes_store_streaming(tmp_path) -> None:
 
     neb = JACXCINEBEngine(k_spring=0.1)
     images = np.array([
-        [[0.0, 0.0, 0.0]],
-        [[0.5, 0.0, 0.0]],
-        [[1.0, 0.0, 0.0]]
-    ])
-    def physical_eval_fn(img) -> Any:
-        import numpy as np
-        centroid = np.mean(img, axis=0)
-        centered = img - centroid
-        val = float(np.sum(centered**2))
-        grad = 2.0 * centered
-        return val, grad
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 1.3]],
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 1.5]],
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 1.7]],
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]],
+    ], dtype=np.float64)
 
     h5_path = tmp_path / "cineb_pes.h5"
-    opt_img, opt_e = neb.optimize_path(images, physical_eval_fn, max_iter=3, pes_store=str(h5_path))
+    opt_img, opt_e = neb.optimize_path(images, _diatomic_double_well_potential, max_iter=5, pes_store=str(h5_path))
 
     store = PESStore(h5_path)
     grid = store.get_grid()
     assert "coordinates" in grid
     assert len(grid["energies"]) > 0
+    assert grid["coordinates"].shape[1:] == (2, 3)
 
 
 def test_kinetic_05_path_integral_bead_calculator() -> None:

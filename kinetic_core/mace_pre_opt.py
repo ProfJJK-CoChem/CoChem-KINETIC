@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """
-CoChem-KINETIC - Stage 2: MACE-OFF24m Active Learning Pre-Optimizer Module
-----------------------------------------------------------------------------
-Interfaces ASE and MACE-OFF24m potential calculator models to pre-relax transition state
-candidates before downstream ab initio DFT / ORCA single-point evaluation.
-Includes GFN2-xTB / PySCF semi-empirical fallback and Float32 noise guards per §8A.2 / §16.1.
-Pairwise Lennard-Jones formulas are strictly prohibited per Method Matrix §8A.2.
+CoChem-KINETIC - Stage 2: Charge-Aware MLFF Pre-Optimizer Module
+----------------------------------------------------------------
+Interfaces ASE with charge-aware AIMNet2 (recommended for Q = -1, 0, +1 and
+H/C/N/O/F/S systems) or MACE-OFF24m (neutral closed-shell only) with Float32
+noise guards per §8A.2 / §16.1.
+
+Strict Scientific Integrity Policy:
+- Silent metallic EMT() fallback is PROHIBITED.
+- Pairwise Lennard-Jones and covalent-radii energy fabrication are PROHIBITED.
+- Neutral-only MACE-OFF is PROHIBITED for charged (charge != 0) or open-shell
+  (multiplicity != 1) species.
+- Missing MLFF/QM backends raise an explicit RuntimeError.
 """
 
+from __future__ import annotations
+
 import logging
-import numpy as np
 from typing import Any
+
+import numpy as np
 
 try:
     import ase
     from ase import Atoms
     from ase.optimize import BFGS
+
     ASE_AVAILABLE = True
 except ImportError:
     ase = None
@@ -25,33 +35,83 @@ except ImportError:
 
 
 class MACEPreOptimizer:
-    """Pre-relaxes structures using MACE-OFF24m neural network potential with Float32 noise guard."""
+    """Pre-relaxes structures using AIMNet2 or MACE-OFF24m with Float32 noise guards."""
 
     FLOAT32_NOISE_FLOOR: float = 1e-5
+    MIN_FMAX_FLOOR: float = 1e-3
 
-    def __init__(self, model_name: str = "medium") -> None:
+    def __init__(
+        self,
+        model_name: str = "medium",
+        backend: str = "auto",
+        charge: int = 0,
+        multiplicity: int = 1,
+        calculator: Any | None = None,
+    ) -> None:
         self.model_name = model_name
-        self.logger = logging.getLogger("CoChem_KINETIC_MACE")
-        self.calculator = self._init_calculator()
+        self.backend = backend.lower()
+        self.charge = int(charge)
+        self.multiplicity = int(multiplicity)
+        self.logger = logging.getLogger("CoChem_KINETIC_MLFF")
+        self.backend_name: str | None = None
+        if calculator is not None:
+            self.calculator = calculator
+            self.backend_name = type(calculator).__name__
+        else:
+            self.calculator = self._init_calculator()
 
-    def _init_calculator(self) -> Any:
-        """Attempts to load MACE-OFF24m; falls back to MMFF94 / EMT if unavailable."""
+    def _init_calculator(self) -> Any | None:
+        """
+        Attempts to initialize a genuine MLFF calculator (AIMNet2 or MACE-OFF).
+        Never falls back silently to metallic EMT or empirical covalent radii.
+        """
         if not ASE_AVAILABLE:
-            self.logger.warning("ASE not installed. MACE Pre-Optimizer using physical fallback.")
+            self.logger.warning("ASE is not installed; no MLFF ASE calculator initialized.")
             return None
 
-        try:
-            from mace.calculators import mace_off
-            calc = mace_off(model=self.model_name, device="cpu")
-            self.logger.info(f"Initialized MACE-OFF24m ({self.model_name}) calculator.")
-            return calc
-        except (ImportError, RuntimeError, ValueError) as e:
-            self.logger.warning(f"MACE-OFF24m initialization failed ({e}). Falling back to RDKit MMFF94 / EMT.")
+        # 1. Charge-aware AIMNet2 (supports Q = -1, 0, +1 and H,C,N,O,F,S)
+        if self.backend in {"auto", "aimnet", "aimnet2"}:
             try:
-                from ase.calculators.emt import EMT
-                return EMT()
-            except (ImportError, RuntimeError, ValueError):
+                from aimnet.calculators import AIMNet2ASE
+
+                aimnet_model = "aimnet2" if self.model_name in {"medium", "small", "large", "aimnet2"} else self.model_name
+                calc = AIMNet2ASE(aimnet_model, charge=self.charge, mult=self.multiplicity)
+                self.backend_name = f"aimnet2:{aimnet_model}"
+                self.logger.info(
+                    f"Initialized charge-aware AIMNet2 ({aimnet_model}, Q={self.charge}, M={self.multiplicity})."
+                )
+                return calc
+            except (ImportError, RuntimeError, ValueError) as exc:
+                if self.backend in {"aimnet", "aimnet2"}:
+                    self.logger.warning(f"Requested AIMNet2 backend unavailable: {exc}")
+                    return None
+                self.logger.info(f"AIMNet2 unavailable ({exc}); checking MACE-OFF.")
+
+        # 2. Neutral-only MACE-OFF (strictly blocked for charged or open-shell species)
+        if self.backend in {"auto", "mace", "mace_off"}:
+            if self.charge != 0 or self.multiplicity != 1:
+                self.logger.warning(
+                    f"Refusing neutral-only MACE-OFF for charged/open-shell system "
+                    f"(Q={self.charge}, M={self.multiplicity}). Use AIMNet2 instead."
+                )
                 return None
+            try:
+                from mace.calculators import mace_off
+
+                calc = mace_off(model=self.model_name, device="cpu")
+                self.backend_name = f"mace_off:{self.model_name}"
+                self.logger.info(f"Initialized MACE-OFF24 ({self.model_name}) calculator.")
+                return calc
+            except (ImportError, RuntimeError, ValueError) as exc:
+                self.logger.warning(f"MACE-OFF initialization unavailable ({exc}).")
+                return None
+
+        return None
+
+    @classmethod
+    def guard_fmax(cls, fmax: float) -> float:
+        """Guards requested fmax against single-precision Float32 noise floor (§8A.2)."""
+        return float(max(fmax, cls.MIN_FMAX_FLOOR))
 
     def apply_float32_noise_guard(
         self,
@@ -72,10 +132,10 @@ class MACEPreOptimizer:
             return True
 
         if prev_grad is not None and curr_grad is not None:
-            norm_curr = np.linalg.norm(curr_grad)
-            norm_prev = np.linalg.norm(prev_grad)
+            norm_curr = float(np.linalg.norm(curr_grad))
+            norm_prev = float(np.linalg.norm(prev_grad))
             if norm_curr < 1e-3 and norm_prev < 1e-3:
-                dot_prod = np.sum(prev_grad * curr_grad)
+                dot_prod = float(np.sum(prev_grad * curr_grad))
                 if dot_prod < -0.2 * norm_curr * norm_prev:
                     self.logger.info(
                         "Float32 noise guard activated: gradient sign-flip detected in low-force regime. "
@@ -91,95 +151,54 @@ class MACEPreOptimizer:
         coords: np.ndarray,
         max_steps: int = 50,
         fmax: float = 0.05,
+        charge: int | None = None,
+        multiplicity: int | None = None,
     ) -> tuple[np.ndarray, float]:
         """
-        Pre-relaxes Cartesian coordinates using MACE / fallback potential.
-        Includes Float32 precision floor guard (1e-5), fmax guard, and gradient sign-flip check.
-        Returns: (relaxed_coords, final_energy_ev)
+        Pre-relaxes Cartesian coordinates using a genuine MLFF/QM ASE calculator.
+        Raises RuntimeError if no valid MLFF/QM backend is installed (never falls back
+        to metallic EMT or fabricated covalent-radii energies).
+
+        Returns:
+            (relaxed_coords_angstrom, final_energy_ev)
         """
-        # Guard fmax against single-precision noise floor (§8A.2)
-        fmax_guarded = max(fmax, 1e-3)
+        eff_charge = self.charge if charge is None else int(charge)
+        eff_mult = self.multiplicity if multiplicity is None else int(multiplicity)
+        fmax_guarded = self.guard_fmax(fmax)
 
-        if not ASE_AVAILABLE or self.calculator is None:
-            self.logger.info("MACE/ASE calculator unavailable. Evaluating geometry using semi-empirical GFN2-xTB / PySCF physical potential.")
-            
-            # 1. RDKit MMFF94 force field
-            try:
-                from rdkit import Chem
-                from rdkit.Chem import rdForceFieldHelpers
-                mol = Chem.RWMol()
-                for s in symbols:
-                    mol.AddAtom(Chem.Atom(s))
-                conf = Chem.Conformer(len(symbols))
-                for idx, c in enumerate(coords):
-                    conf.SetAtomPosition(idx, [float(c[0]), float(c[1]), float(c[2])])
-                for i in range(len(symbols)):
-                    for j in range(i + 1, len(symbols)):
-                        dist = float(np.linalg.norm(coords[i] - coords[j]))
-                        if dist < 1.8:
-                            mol.AddBond(i, j, Chem.BondType.SINGLE)
-                mol_obj = mol.GetMol()
-                mol_obj.AddConformer(conf, assignId=True)
-                ff = rdForceFieldHelpers.MMFFGetMoleculeForceField(mol_obj)
-                if ff is not None:
-                    e_kcal = ff.CalcEnergy()
-                    ff.Minimize(maxIters=max_steps)
-                    new_conf = mol_obj.GetConformer()
-                    opt_coords = np.array(
-                        [[new_conf.GetAtomPosition(k).x, new_conf.GetAtomPosition(k).y, new_conf.GetAtomPosition(k).z] for k in range(len(symbols))]
-                    )
-                    e_ev = float(ff.CalcEnergy()) * 0.0433641  # kcal/mol to eV
-                    return opt_coords, e_ev
-            except (ImportError, ValueError, RuntimeError) as exc:
-                self.logger.warning(f"RDKit MMFF94 pre-optimization failed: {exc}. Attempting GFN2-xTB / PySCF fallback.")
+        if not ASE_AVAILABLE:
+            raise RuntimeError(
+                "ASE is required for geometry pre-relaxation. No valid MLFF/QM backend is available; "
+                "silent EMT and geometric fallbacks are prohibited."
+            )
 
-            # 2. GFN2-xTB via tblite
-            try:
-                from tblite.ase import TBLite
-                calc_tb = TBLite(method="GFN2-xTB")
-                atoms_tb = Atoms(symbols=symbols, positions=coords)
-                atoms_tb.calc = calc_tb
-                opt_tb = BFGS(atoms_tb, logfile=None)
-                opt_tb.run(fmax=fmax_guarded, steps=max_steps)
-                return atoms_tb.get_positions(), float(atoms_tb.get_potential_energy())
-            except (ImportError, RuntimeError, ValueError) as tb_exc:
-                self.logger.warning(f"GFN2-xTB tblite fallback failed: {tb_exc}. Attempting PySCF ab initio fallback.")
+        if self.calculator is None:
+            raise RuntimeError(
+                f"No valid MLFF/QM backend available (backend='{self.backend}', Q={eff_charge}, M={eff_mult}). "
+                "Install charge-aware 'aimnet' (AIMNet2) or neutral 'mace-torch'; silent EMT and "
+                "covalent-radii energy fallbacks are strictly prohibited."
+            )
 
-            # 3. PySCF RHF fallback
-            try:
-                from pyscf import gto, scf
-                mol = gto.Mole()
-                mol.atom = [[symbols[k], coords[k]] for k in range(len(symbols))]
-                mol.basis = 'sto-3g'
-                mol.verbose = 0
-                mol.build()
-                mf = scf.RHF(mol)
-                e_tot_hartree = float(mf.kernel())
-                return coords, e_tot_hartree * 27.211386245988
-            except (ImportError, RuntimeError, ValueError) as py_exc:
-                self.logger.warning(f"PySCF ab initio fallback failed: {py_exc}. Using physical geometric centroid alignment.")
+        if self.backend_name and self.backend_name.startswith("mace_off") and (eff_charge != 0 or eff_mult != 1):
+            raise RuntimeError(
+                f"Neutral-only MACE-OFF cannot relax charged/open-shell species (Q={eff_charge}, M={eff_mult}). "
+                "Use charge-aware AIMNet2."
+            )
 
-            # 4. Geometric / physical fallback (NO pairwise LJ)
-            centroid = np.mean(coords, axis=0)
-            centered_coords = coords - centroid
-            # Estimate physical energy from atomic covalent radii bounds
-            covalent_radii = {"H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57, "P": 1.07, "S": 1.05, "Cl": 1.02}
-            est_energy_ev = 0.0
-            for i in range(len(symbols)):
-                r_i = covalent_radii.get(symbols[i], 1.0)
-                est_energy_ev -= 13.6 / (r_i ** 2)
-            return centered_coords, float(est_energy_ev)
-
-        # MACE / ASE optimization path with Float32 noise guard
-        atoms = Atoms(symbols=symbols, positions=coords)
+        atoms = Atoms(symbols=symbols, positions=np.asarray(coords, dtype=np.float64))
+        atoms.info["charge"] = eff_charge
+        atoms.info["spin"] = eff_mult
+        if hasattr(self.calculator, "set_charge"):
+            self.calculator.set_charge(eff_charge)
+        if hasattr(self.calculator, "set_mult"):
+            self.calculator.set_mult(eff_mult)
         atoms.calc = self.calculator
 
         opt = BFGS(atoms, logfile=None)
-        
-        # Step-by-step optimization with noise guard
-        prev_grad = None
-        prev_energy = None
-        
+
+        prev_grad: np.ndarray | None = None
+        prev_energy: float | None = None
+
         for step in range(max_steps):
             forces = atoms.get_forces()
             grads = -forces
@@ -187,7 +206,9 @@ class MACEPreOptimizer:
             fmax_curr = float(np.max(np.linalg.norm(forces, axis=1)))
 
             if fmax_curr <= fmax_guarded:
-                self.logger.info(f"Pre-optimization converged to target fmax ({fmax_curr:.4f} <= {fmax_guarded:.4f}) at step {step}.")
+                self.logger.info(
+                    f"Pre-optimization converged to target fmax ({fmax_curr:.4f} <= {fmax_guarded:.4f}) at step {step}."
+                )
                 break
 
             if self.apply_float32_noise_guard(prev_grad, grads, prev_energy, curr_energy):
@@ -199,7 +220,5 @@ class MACEPreOptimizer:
 
         relaxed_coords = atoms.get_positions()
         energy_ev = float(atoms.get_potential_energy())
-        self.logger.info(f"MACE Pre-Relaxation complete. Energy: {energy_ev:.4f} eV")
+        self.logger.info(f"MLFF Pre-Relaxation complete ({self.backend_name}). Energy: {energy_ev:.6f} eV")
         return relaxed_coords, energy_ev
-
-
