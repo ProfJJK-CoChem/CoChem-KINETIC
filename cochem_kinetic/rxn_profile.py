@@ -350,8 +350,10 @@ def compute_rrho_thermochemistry(
     Only real positive vibrational frequencies (> 0, excluding imaginary modes) enter
     the vibrational partition function.
     """
-    if temp_k <= 0.0:
-        raise ValueError("temp_k must be strictly positive.")
+    if not math.isfinite(temp_k) or temp_k <= 0.0:
+        raise ValueError(f"temp_k must be a finite strictly positive float, got {temp_k!r}.")
+    if not math.isfinite(pressure_atm) or pressure_atm <= 0.0:
+        raise ValueError(f"pressure_atm must be a finite strictly positive float, got {pressure_atm!r}.")
 
     masses = masses_from_symbols(symbols)
     total_mass_kg = float(np.sum(masses)) * AMU_TO_KG
@@ -580,6 +582,7 @@ def discover_midpoint_intermediate_aimnet2(
     charge: int = 0,
     multiplicity: int = 1,
     temp_k: float = 298.15,
+    pressure_atm: float = 1.0,
     calc: Any | None = None,
     rmsd_threshold_ang: float = 0.25,
     fmax_threshold_ev_ang: float = 0.02,
@@ -648,6 +651,7 @@ def discover_midpoint_intermediate_aimnet2(
                 charge=charge,
                 multiplicity=multiplicity,
                 temp_k=temp_k,
+                pressure_atm=pressure_atm,
                 calc=eff_calc,
             )
             n_imag = int(hess_res["thermo"]["n_imag"])
@@ -1042,6 +1046,7 @@ def analyze_stationary_point_aimnet2(
     charge: int = 0,
     multiplicity: int = 1,
     temp_k: float = 298.15,
+    pressure_atm: float = 1.0,
     calc: Any | None = None,
     delta_ang: float = 0.005,
     imag_threshold_cm1: float = -15.0,
@@ -1060,6 +1065,7 @@ def analyze_stationary_point_aimnet2(
         coords=coords,
         freqs_cm1=freqs_cm1,
         temp_k=temp_k,
+        pressure_atm=pressure_atm,
         multiplicity=multiplicity,
         imag_threshold_cm1=imag_threshold_cm1,
     )
@@ -1517,7 +1523,7 @@ def assemble_and_export_profile(
         f"- **Pathway Mode:** `{pathway_mode}` (`{input_mode}`)",
         f"- **Formula / Charge / Spin:** `{stoich_report['formula']}` ({stoich_report['n_atoms']} atoms, Q = {stoich_report['charge']}, M = {stoich_report['multiplicity']})",
         f"- **DFT Level:** `{dft_method_label}/{metadata.get('basis', 'def2-tzvpp')}` + `{metadata.get('solvation_model', 'pcm').upper()}({metadata.get('solvent_name', 'acetonitrile')}, eps={metadata.get('eps', 'N/A')})`",
-        f"- **Thermochemistry Temperature:** `{metadata.get('temp_k', 298.15)} K` (AIMNet2 Hessian + RRHO / Grimme qRRHO)",
+        f"- **Thermochemistry Temperature / Pressure:** `{metadata.get('temp_k', 298.15)} K`, `{metadata.get('pressure_atm', 1.0)} atm` (AIMNet2 Hessian + RRHO / Grimme qRRHO)",
         "",
         "| State | Status | N_imag | Imag Freq (cm^-1) | Key Active Bond | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",
         "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -1594,18 +1600,25 @@ def assemble_and_export_profile(
     else:
         ts_n_imag_value = ts_n_imag_by_state
 
+    eff_pressure_atm = float(
+        metadata.get("pressure_atm", ref_thermo.get("pressure_atm", 1.0))
+    )
+    metadata_out = dict(metadata)
+    metadata_out.setdefault("pressure_atm", eff_pressure_atm)
+
     results_payload: dict[str, Any] = {
         "schema_version": "cochem.kinetic.rxn-profile/1",
         "case_name": case_name,
         "reaction_equation": reaction_equation,
         "pathway_mode": pathway_mode,
         "input_mode": input_mode,
+        "pressure_atm": eff_pressure_atm,
         "stationary_points": ordered_states,
         "ts_n_imaginary_modes": ts_n_imag_value,
         "ts_n_imaginary_modes_by_state": ts_n_imag_by_state,
         "ts_all_first_order": bool(ts_states and all(v == 1 for v in ts_n_imag_by_state.values())),
         "primary_ts_state": primary_ts_state,
-        "metadata": metadata,
+        "metadata": metadata_out,
         "stoichiometry": stoich_report,
         "stationary_table": rows,
         "states": clean_states,

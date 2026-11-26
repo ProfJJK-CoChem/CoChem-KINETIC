@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import math
 import shlex
 import shutil
 import sys
@@ -118,15 +119,28 @@ class KineticHPCDispatcher:
         t_flat = T.flatten()
         p_flat = P.flatten()
 
-        payloads: list[dict[str, Any]] = [
-            {
-                "endpoint": "/goal",
-                "temperature": float(t),
-                "pressure": float(p),
-                "cli_args": [*map(str, base_cli_args), "--temp-k", str(float(t))],
-            }
-            for t, p in zip(t_flat, p_flat)
-        ]
+        payloads: list[dict[str, Any]] = []
+        for t, p in zip(t_flat, p_flat):
+            t_val = float(t)
+            p_val = float(p)
+            if not math.isfinite(t_val) or t_val <= 0.0:
+                raise ValueError(f"Temperature must be finite and > 0 K, got {t!r}.")
+            if not math.isfinite(p_val) or p_val <= 0.0:
+                raise ValueError(f"Pressure must be finite and > 0 atm, got {p!r}.")
+            payloads.append(
+                {
+                    "endpoint": "/goal",
+                    "temperature": t_val,
+                    "pressure": p_val,
+                    "cli_args": [
+                        *map(str, base_cli_args),
+                        "--temp-k",
+                        str(t_val),
+                        "--pressure-atm",
+                        str(p_val),
+                    ],
+                }
+            )
 
         num_workers = min(len(payloads), self.batch_size)
         workers: list[asyncio.Task[None]] = [asyncio.create_task(self._worker()) for _ in range(num_workers)]

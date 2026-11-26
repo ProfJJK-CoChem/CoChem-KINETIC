@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import math
 import shlex
 import shutil
 import sys
@@ -145,14 +146,26 @@ class KineticHPCDispatcher:
         workers: list[asyncio.Task[str]] = []
         idx = 0
         for T in T_grid:
+            t_val = float(T)
+            if not math.isfinite(t_val) or t_val <= 0.0:
+                raise ValueError(f"Temperature must be finite and > 0 K, got {T!r}.")
             for P in P_grid:
+                p_val = float(P)
+                if not math.isfinite(p_val) or p_val <= 0.0:
+                    raise ValueError(f"Pressure must be finite and > 0 atm, got {P!r}.")
                 payload = {
                     "id": idx,
                     "target": "/goal",
                     "task": "master_equation_grid_point",
-                    "T": float(T),
-                    "P": float(P),
-                    "cli_args": [*map(str, base_cli_args), "--temp-k", str(float(T))],
+                    "T": t_val,
+                    "P": p_val,
+                    "cli_args": [
+                        *map(str, base_cli_args),
+                        "--temp-k",
+                        str(t_val),
+                        "--pressure-atm",
+                        str(p_val),
+                    ],
                 }
                 payloads.append(payload)
                 idx += 1
