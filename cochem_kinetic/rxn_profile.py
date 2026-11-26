@@ -19,7 +19,7 @@ Stages:
      Grimme qRRHO thermochemistry.
   4. Bidirectional mass-weighted IRC connectivity verification (IRCTracerEngine)
      confirming < 0.15 A heavy-atom RMSD and identical covalent bond graphs.
-  5. PySCF / GPU4PySCF DF-wB97X-D3/def2-TZVPP (or def2-SVP) + PCM/ddCOSMO single-point
+  5. PySCF / GPU4PySCF DF-wB97X-D3(0)/def2-TZVPP (or def2-SVP) + PCM/ddCOSMO single-point
      energies, wall-clock timing telemetry, CSV/Markdown tables, and SHA-256 manifest.
 """
 
@@ -1127,8 +1127,48 @@ def verify_ts_irc_aimnet2(
 
 
 # =============================================================================
-# 3. PySCF / GPU4PySCF DF-wB97X-D3/def2-TZVPP + PCM Single-Point Runner
+# 3. PySCF / GPU4PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM Single-Point Runner
 # =============================================================================
+
+
+def format_dft_method_label(xc: str, disp: str | None) -> str:
+    """
+    Formats a scientifically exact density-fitted DFT method label.
+
+    In PySCF 2.14 / GPU4PySCF 1.9, ``scf.dispersion.parse_dft`` blacklists the
+    Lin et al. (2013) reparameterized ``wb97x_d3`` / ``wb97x-d3`` keys and
+    ``pyscf-dispersion`` does not ship a ``wb97xd3`` D3(0) parameter table.
+    Consequently, ``xc="wb97x"`` (Chai & Head-Gordon 2008 bare wB97X, Libxc ID 464)
+    paired with ``disp="d3zero"`` is explicitly labeled ``DF-wB97X-D3(0)`` — never
+    mislabeled as reparameterized ``DF-wB97X-D3``.
+    """
+    xc_clean = str(xc or "wb97x").strip()
+    xc_key = xc_clean.lower()
+    xc_display_map = {
+        "wb97x": "wB97X",
+        "wb97x_v": "wB97X-V",
+        "wb97x-v": "wB97X-V",
+        "wb97m_v": "wB97M-V",
+        "wb97m-v": "wB97M-V",
+        "wb97x-d3bj": "wB97X-D3(BJ)",
+        "wb97m-d3bj": "wB97M-D3(BJ)",
+        "b3lyp": "B3LYP",
+        "pbe0": "PBE0",
+        "r2scan": "r2SCAN",
+    }
+    xc_label = xc_display_map.get(xc_key, xc_clean)
+
+    disp_key = str(disp or "").strip().lower()
+    if not disp_key or disp_key == "none":
+        return f"DF-{xc_label}"
+
+    disp_display_map = {
+        "d3zero": "D3(0)",
+        "d3bj": "D3(BJ)",
+        "d4": "D4",
+    }
+    disp_label = disp_display_map.get(disp_key, disp_key.upper())
+    return f"DF-{xc_label}-{disp_label}"
 
 
 def run_pyscf_single_point(
@@ -1137,6 +1177,8 @@ def run_pyscf_single_point(
     charge: int = 0,
     multiplicity: int = 1,
     basis: str = "def2-tzvpp",
+    # Bare 2008 Chai & Head-Gordon wB97X (Libxc ID 464) + Grimme D3(0) -> DF-wB97X-D3(0).
+    # PySCF 2.14 blacklists wb97x_d3/wb97x-d3 in pyscf.scf.dispersion.parse_dft.
     xc: str = "wb97x",
     disp: str = "d3zero",
     solvent_name: str = "acetonitrile",
@@ -1150,7 +1192,9 @@ def run_pyscf_single_point(
 ) -> dict[str, Any]:
     """
     Executes a genuine PySCF or GPU4PySCF DF-DFT + D3 + PCM/ddCOSMO single-point
-    energy calculation and returns full electronic/solvation/dispersion telemetry.
+    energy calculation (default: DF-wB97X-D3(0)/def2-TZVPP using bare 2008 wB97X
+    + Grimme D3(0), distinct from Lin et al. 2013 reparameterized wB97X-D3) and
+    returns full electronic/solvation/dispersion telemetry.
     """
     eff_solvent, eff_eps = resolve_solvent_eps(solvent_name, eps)
     phase_mode = "gas" if (solvation_model.lower() == "gas" or eff_solvent in {"gas", "vacuum"}) else solvation_model.lower()
@@ -1225,6 +1269,7 @@ def run_pyscf_single_point(
     mf.max_cycle = int(max_cycle)
 
     if disp and disp.lower() not in {"none", ""}:
+        # Attach explicit Grimme dispersion (e.g. d3zero -> D3(0)) to the base xc functional.
         mf.disp = disp.lower()
 
     if phase_mode == "pcm":
@@ -1271,6 +1316,7 @@ def run_pyscf_single_point(
         "basis": basis,
         "xc": xc,
         "disp": disp.lower() if disp else "none",
+        "method_label": format_dft_method_label(xc, disp),
         "solvation_model": phase_mode,
         "solvent_name": eff_solvent,
         "eps": eff_eps,
@@ -1460,13 +1506,17 @@ def assemble_and_export_profile(
 
     # Write stationary_table.md
     n_pts = len(ordered_states)
+    dft_method_label = format_dft_method_label(
+        str(metadata.get("xc", "wb97x")),
+        str(metadata.get("disp", "d3zero")),
+    )
     md_lines = [
         f"# {case_name} — {n_pts}-Stationary-Point Reaction Profile",
         "",
         f"- **Reaction:** `{reaction_equation}`",
         f"- **Pathway Mode:** `{pathway_mode}` (`{input_mode}`)",
         f"- **Formula / Charge / Spin:** `{stoich_report['formula']}` ({stoich_report['n_atoms']} atoms, Q = {stoich_report['charge']}, M = {stoich_report['multiplicity']})",
-        f"- **DFT Level:** `DF-{metadata.get('xc', 'wb97x').upper()}-{metadata.get('disp', 'd3zero').upper()}/{metadata.get('basis', 'def2-tzvpp')}` + `{metadata.get('solvation_model', 'pcm').upper()}({metadata.get('solvent_name', 'acetonitrile')}, eps={metadata.get('eps', 'N/A')})`",
+        f"- **DFT Level:** `{dft_method_label}/{metadata.get('basis', 'def2-tzvpp')}` + `{metadata.get('solvation_model', 'pcm').upper()}({metadata.get('solvent_name', 'acetonitrile')}, eps={metadata.get('eps', 'N/A')})`",
         f"- **Thermochemistry Temperature:** `{metadata.get('temp_k', 298.15)} K` (AIMNet2 Hessian + RRHO / Grimme qRRHO)",
         "",
         "| State | Status | N_imag | Imag Freq (cm^-1) | Key Active Bond | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",

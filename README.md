@@ -26,7 +26,7 @@
 - **Quantum Tunneling Corrections:** Asymmetric Eckart tunneling (`cochem_kinetic.math.tunneling.calculate_eckart_tunneling`), Wigner tunneling with cryogenic safeguard (`calculate_wigner_correction`), and Skodje–Truhlar high-barrier tunneling (`kinetic_core.thermo.skodje_truhlar_tunneling_correction`).
 - **Microcanonical RRKM & Master Equation:** Exact Beyer–Swinehart direct-count density and sum of states (`cochem_kinetic.engine.rrkm_theory.RRKMSolver`) and collision energy-transfer bounding (`cochem_kinetic.engine.master_equation.MasterEquation`).
 - **Solution-Phase Diffusion Limits:** Stokes–Einstein / Smoluchowski bimolecular encounter limits (`cochem_kinetic.literature.diffusion_mapping.SmoluchowskiDiffusionEngine`).
-- **Charge-Aware Reaction-Profile Pipeline (`cochem_kinetic/rxn_profile.py`):** End-to-end AIMNet2 CI-NEB, Sella / Eckart-projected P-RFO saddle polish, central-difference Eckart-projected Hessian, bidirectional mass-weighted IRC verification, and PySCF / GPU4PySCF DF-wB97X-D3/def2-TZVPP + PCM/ddCOSMO single-point assembly for CHEM 312L workflows (both 5-point stepwise and 2-endpoint auto 3-point/5-point modes).
+- **Charge-Aware Reaction-Profile Pipeline (`cochem_kinetic/rxn_profile.py`):** End-to-end AIMNet2 CI-NEB, Sella / Eckart-projected P-RFO saddle polish, central-difference Eckart-projected Hessian, bidirectional mass-weighted IRC verification, and PySCF / GPU4PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM/ddCOSMO single-point assembly for CHEM 312L workflows (both 5-point stepwise and 2-endpoint auto 3-point/5-point modes).
 
 ---
 

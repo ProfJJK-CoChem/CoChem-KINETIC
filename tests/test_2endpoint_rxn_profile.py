@@ -386,6 +386,7 @@ def test_elementary_3pt_end_to_end_analytical_pipeline_and_export(tmp_path: Path
     md_text = (tmp_path / "stationary_table.md").read_text(encoding="utf-8")
     assert "3-Stationary-Point Reaction Profile" in md_text
     assert "elementary_3pt" in md_text
+    assert "DF-wB97X-D3(0)/def2-SVP" in md_text
 
     with open(tmp_path / "stationary_table.csv", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))

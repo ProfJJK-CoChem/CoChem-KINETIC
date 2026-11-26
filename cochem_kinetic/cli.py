@@ -5,7 +5,7 @@ Registered via [project.scripts] in pyproject.toml.
 
 Subcommands:
   - rxn-profile     : Run or stage a 5-stationary-point charge-aware reaction profile
-                      (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC + PySCF DF-wB97X-D3/def2-TZVPP + PCM).
+                      (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC + PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM).
   - validate-stoich : Strictly validate atom, element, charge, spin, and clash balance across XYZs.
   - list-specs      : List built-in CHEM 312 Spring 2027 balanced reaction specifications.
 """

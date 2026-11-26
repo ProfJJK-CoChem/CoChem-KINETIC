@@ -194,24 +194,3 @@ class NoseHooverAIMDSampler:
 
         self.logger.info(f"Sampled {len(frames)} NVT trajectory frames at T={self.target_temp_k} K (dt={dt_fs} fs).")
         return frames
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("CoChem_KINETIC_AIMD")
-    sampler = NoseHooverAIMDSampler()
-    syms = ["Fe", "O", "O"]
-    coords = np.array([[0.0,0.0,0.0], [0.0,0.0,1.2], [0.0,1.2,0.0]])
-    masses = np.array([55.845, 15.999, 15.999])
-    
-    def dummy_force(c: np.ndarray) -> np.ndarray:
-        return -0.5 * (c - coords) * 1e10
-        
-    trajectory = sampler.sample_nvt_trajectory(syms, coords, masses, n_steps=10, force_fn=dummy_force)
-    logger.info(f"AIMD Sampler test passed. Trajectory frames: {len(trajectory)}")
-
-    p_beads = calculate_required_beads(300.0, 3000.0)
-    logger.info(f"Required beads at 300 K / 3000 cm-1: {p_beads}")
-
-    rot_res = compute_rotational_constants_md(coords, masses, is_classical_md=True)
-    logger.info(f"Classical MD B0 res: provenance={rot_res['provenance_tag']}, warning={rot_res['warning']}")
