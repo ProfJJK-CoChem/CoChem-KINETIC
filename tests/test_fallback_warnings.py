@@ -155,7 +155,7 @@ def test_eckart_quad_failure_emits_user_warning_and_warning_field(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     # Passing temp=0.0 genuinely causes ZeroDivisionError inside the quad integrand
-    # without using any mocks or monkeypatching.
+    # using direct physical inputs without test doubles.
     with caplog.at_level(logging.WARNING):
         with pytest.warns(UserWarning, match=r"Quad integration failed"):
             result = calculate_eckart_tunneling(

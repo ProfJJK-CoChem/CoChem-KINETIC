@@ -5,7 +5,7 @@ Registered via [project.scripts] in pyproject.toml.
 
 Subcommands:
   - rxn-profile     : Run or stage a 5-stationary-point charge-aware reaction profile
-                      (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC + PySCF DF-wB97X-D3/def2-TZVPP + PCM).
+                      (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC + PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM).
   - validate-stoich : Strictly validate atom, element, charge, spin, and clash balance across XYZs.
   - list-specs      : List built-in CHEM 312 Spring 2027 balanced reaction specifications.
 """
@@ -15,6 +15,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +53,24 @@ from cochem_kinetic.rxn_profile import (
 )
 
 logger = logging.getLogger("cochem_kinetic.cli")
+
+
+def _positive_float(value: str) -> float:
+    """Argparse type enforcing a finite strictly positive floating-point value (> 0)."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Expected a positive float, got {value!r}.") from exc
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"Value must be finite and > 0, got {value!r}.")
+    return parsed
+
+
+def _validated_pressure_atm(args: argparse.Namespace, fallback: float = 1.0) -> float:
+    pressure_atm = float(getattr(args, "pressure_atm", fallback))
+    if not math.isfinite(pressure_atm) or pressure_atm <= 0.0:
+        raise ValueError(f"--pressure-atm must be a finite value > 0, got {pressure_atm!r}.")
+    return pressure_atm
 
 
 def _load_input_geometries(
@@ -108,6 +129,7 @@ def _run_mlff_stage(
     case_name: str,
     eq: str | None,
 ) -> None:
+    pressure_atm = _validated_pressure_atm(args)
     input_dir = Path(args.input_dir)
     loaded = load_reaction_inputs(
         input_dir,
@@ -175,6 +197,7 @@ def _run_mlff_stage(
             charge=charge,
             multiplicity=mult,
             temp_k=args.temp_k,
+            pressure_atm=pressure_atm,
             calc=calc,
             rmsd_threshold_ang=0.25,
             fmax_threshold_ev_ang=0.02,
@@ -295,6 +318,7 @@ def _run_mlff_stage(
             charge=charge,
             multiplicity=mult,
             temp_k=args.temp_k,
+            pressure_atm=pressure_atm,
             calc=calc,
         )
 
@@ -366,6 +390,7 @@ def _run_mlff_stage(
         "charge": charge,
         "multiplicity": mult,
         "temp_k": args.temp_k,
+        "pressure_atm": pressure_atm,
         "stoichiometry": stoich_final,
         "intermediate_discovery": intermediate_discovery,
         "optimization": opt_logs,
@@ -474,6 +499,7 @@ def _run_assemble_stage(
     eff_eq = eq or mlff_data.get("reaction_equation") or (
         "R -> TS -> P" if active_states == ELEMENTARY_STATIONARY_STATES else "R -> TS1 -> Int_tet -> TS2 -> P"
     )
+    pressure_atm = _validated_pressure_atm(args, fallback=float(mlff_data.get("pressure_atm", 1.0)))
     metadata = {
         "case_name": case_name,
         "pathway_mode": mlff_data.get(
@@ -485,6 +511,7 @@ def _run_assemble_stage(
         "intermediate_discovery": mlff_data.get("intermediate_discovery"),
         "ts_diagnostics": mlff_data.get("ts_diagnostics"),
         "temp_k": args.temp_k,
+        "pressure_atm": pressure_atm,
         "basis": args.basis,
         "xc": args.xc,
         "disp": args.disp,
@@ -551,7 +578,24 @@ def _cmd_validate_stoich(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_aimnet_python() -> str | None:
+    """Return non-empty $COCHEM_AIMNET_PYTHON from the environment, or None."""
+    raw = os.environ.get("COCHEM_AIMNET_PYTHON", "").strip()
+    return raw or None
+
+
+def _require_executable_python(executable: str, label: str) -> str:
+    """Fail closed if a configured isolated Python interpreter does not exist."""
+    if not Path(executable).is_file() and shutil.which(executable) is None:
+        raise FileNotFoundError(
+            f"{label} Python executable not found: {executable!r}. "
+            "Pass a valid interpreter path or update COCHEM_AIMNET_PYTHON."
+        )
+    return executable
+
+
 def _cmd_rxn_profile(args: argparse.Namespace) -> int:
+    pressure_atm = _validated_pressure_atm(args)
     spec = get_builtin_spec(args.spec) if args.spec else None
     charge = args.charge if args.charge is not None else (spec["charge"] if spec else 0)
     mult = args.multiplicity if args.multiplicity is not None else (spec["multiplicity"] if spec else 1)
@@ -577,6 +621,8 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
             require_same_atom_order=True,
         )
         report["input_mode"] = detect_input_mode(loaded)
+        report["temp_k"] = float(args.temp_k)
+        report["pressure_atm"] = pressure_atm
         print(json.dumps(report, indent=2))
         return 0
 
@@ -593,10 +639,20 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2))
         return 0
 
-    # stage == "all": allow separate Python silos if --aimnet-python or --pyscf-python supplied
-    if args.aimnet_python or args.pyscf_python:
-        aimnet_py = args.aimnet_python or sys.executable
-        pyscf_py = args.pyscf_python or sys.executable
+    # stage == "all": allow separate Python silos if --aimnet-python, $COCHEM_AIMNET_PYTHON, or --pyscf-python supplied
+    resolved_aimnet_py = (args.aimnet_python or "").strip() or _default_aimnet_python()
+    resolved_pyscf_py = (args.pyscf_python or "").strip() or None
+    if resolved_aimnet_py or resolved_pyscf_py:
+        aimnet_py = (
+            _require_executable_python(resolved_aimnet_py, "AIMNet2")
+            if resolved_aimnet_py
+            else sys.executable
+        )
+        pyscf_py = (
+            _require_executable_python(resolved_pyscf_py, "PySCF")
+            if resolved_pyscf_py
+            else sys.executable
+        )
         base_flags = [
             "-m", "cochem_kinetic.cli", "rxn-profile",
             "--input-dir", str(args.input_dir),
@@ -605,6 +661,7 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
             "--multiplicity", str(mult),
             "--solvent", str(args.solvent),
             "--temp-k", str(args.temp_k),
+            "--pressure-atm", str(pressure_atm),
             "--basis", str(args.basis),
             "--xc", str(args.xc),
             "--disp", str(args.disp),
@@ -685,6 +742,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rxn.add_argument("--solvent", type=str, default="acetonitrile")
     p_rxn.add_argument("--eps", type=float, default=None)
     p_rxn.add_argument("--temp-k", type=float, default=298.15)
+    p_rxn.add_argument(
+        "--pressure-atm",
+        type=_positive_float,
+        default=1.0,
+        help="Ideal-gas reference pressure in atm for RRHO/qRRHO thermochemistry (must be > 0; default: 1.0).",
+    )
     p_rxn.add_argument("--basis", "--dft-basis", dest="basis", type=str, default="def2-tzvpp")
     p_rxn.add_argument("--xc", type=str, default="wb97x")
     p_rxn.add_argument("--disp", type=str, default="d3zero")
@@ -701,7 +764,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rxn.add_argument("--benchmark-all-cpu", action="store_true")
     p_rxn.add_argument("--gas-phase-ftmw-lock", action="store_true")
     p_rxn.add_argument("--stage", choices=["all", "validate", "mlff", "dft", "assemble"], default="all")
-    p_rxn.add_argument("--aimnet-python", type=str, default=None, help="Optional isolated Python executable for AIMNet2 stage")
+    p_rxn.add_argument(
+        "--aimnet-python",
+        type=str,
+        default=_default_aimnet_python(),
+        help="Optional isolated Python executable for AIMNet2 stage (defaults to $COCHEM_AIMNET_PYTHON when set)",
+    )
     p_rxn.add_argument("--pyscf-python", type=str, default=None, help="Optional isolated Python executable for PySCF stage")
     p_rxn.set_defaults(func=_cmd_rxn_profile)
 

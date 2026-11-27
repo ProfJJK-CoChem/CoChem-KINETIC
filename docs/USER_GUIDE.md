@@ -241,7 +241,7 @@ cochem-kinetic validate-stoich --input-dir benchmarks/chem312_teams_matrix/team4
    - Central-difference mass-weighted Eckart-projected Hessian verifying `N_imag == 0` on minima and `N_imag == 1` on transition states, plus RRHO and Grimme qRRHO thermochemistry.
    - Bidirectional mass-weighted IRC verification (`IRCTracerEngine`) requiring heavy-atom `RMSD < 0.15 A` and matching covalent bond graphs.
 3. **DFT Single-Point Stage (`--stage dft`):**
-   - PySCF CPU or GPU4PySCF (`--dft-engine cpu|gpu|both`) DF-wB97X-D3/def2-TZVPP (configurable via `--xc`, `--disp`, `--basis`, `--grid-level`) with PCM, ddCOSMO, or gas phase (`--solvation-model pcm|ddcosmo|gas`, `--solvent`, `--eps`, or `--gas-phase-ftmw-lock`).
+   - PySCF CPU or GPU4PySCF (`--dft-engine cpu|gpu|both`) DF-wB97X-D3(0)/def2-TZVPP (bare 2008 wB97X + Grimme D3(0), configurable via `--xc`, `--disp`, `--basis`, `--grid-level`) with PCM, ddCOSMO, or gas phase (`--solvation-model pcm|ddcosmo|gas`, `--solvent`, `--eps`, or `--gas-phase-ftmw-lock`).
 4. **Assembly & FAIR Export (`--stage assemble`):**
    - Combines MLFF thermochemistry and DFT electronic energies into:
      - `stationary_table.csv` and `stationary_table.md`

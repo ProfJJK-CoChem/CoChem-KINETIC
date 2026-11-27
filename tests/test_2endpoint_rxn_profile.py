@@ -225,6 +225,65 @@ def test_cli_validate_and_parser_flags_for_2endpoint_folders(
     assert parsed.pathway_mode == "3pt"
 
 
+def test_aimnet_python_env_fallback_cli_override_and_fail_closed(tmp_path: Path) -> None:
+    """Verify --aimnet-python defaults to $COCHEM_AIMNET_PYTHON, respects CLI override, and fails closed."""
+    import os
+
+    student_dir = tmp_path / "env_student"
+    out_dir = tmp_path / "env_out"
+    student_dir.mkdir()
+    orig = os.environ.get("COCHEM_AIMNET_PYTHON")
+    try:
+        # 1. Unset / empty -> None
+        os.environ.pop("COCHEM_AIMNET_PYTHON", None)
+        parsed_unset = build_parser().parse_args(
+            ["rxn-profile", "--input-dir", str(student_dir), "--output-dir", str(out_dir)]
+        )
+        assert parsed_unset.aimnet_python is None
+
+        os.environ["COCHEM_AIMNET_PYTHON"] = "   "
+        parsed_blank = build_parser().parse_args(
+            ["rxn-profile", "--input-dir", str(student_dir), "--output-dir", str(out_dir)]
+        )
+        assert parsed_blank.aimnet_python is None
+
+        # 2. Set in environment -> automatically picked up as default
+        env_python = str(tmp_path / "env_aimnet_python")
+        os.environ["COCHEM_AIMNET_PYTHON"] = env_python
+        parsed_env = build_parser().parse_args(
+            ["rxn-profile", "--input-dir", str(student_dir), "--output-dir", str(out_dir)]
+        )
+        assert parsed_env.aimnet_python == env_python
+
+        # 3. Explicit CLI flag takes precedence over environment variable
+        cli_python = str(tmp_path / "cli_aimnet_python")
+        parsed_cli = build_parser().parse_args(
+            [
+                "rxn-profile",
+                "--input-dir", str(student_dir),
+                "--output-dir", str(out_dir),
+                "--aimnet-python", cli_python,
+            ]
+        )
+        assert parsed_cli.aimnet_python == cli_python
+
+        # 4. Fail-closed when COCHEM_AIMNET_PYTHON points to a nonexistent executable
+        with pytest.raises(FileNotFoundError, match="AIMNet2 Python executable not found"):
+            cli_main(
+                [
+                    "rxn-profile",
+                    "--input-dir", str(student_dir),
+                    "--output-dir", str(out_dir),
+                    "--stage", "all",
+                ]
+            )
+    finally:
+        if orig is None:
+            os.environ.pop("COCHEM_AIMNET_PYTHON", None)
+        else:
+            os.environ["COCHEM_AIMNET_PYTHON"] = orig
+
+
 def test_midpoint_intermediate_discovery_triple_well_vs_double_well() -> None:
     """Zero-mock analytical PES check: triple-well discovers Int_tet, double-well does not."""
     symbols = ["C", "O"]
@@ -386,6 +445,7 @@ def test_elementary_3pt_end_to_end_analytical_pipeline_and_export(tmp_path: Path
     md_text = (tmp_path / "stationary_table.md").read_text(encoding="utf-8")
     assert "3-Stationary-Point Reaction Profile" in md_text
     assert "elementary_3pt" in md_text
+    assert "DF-wB97X-D3(0)/def2-SVP" in md_text
 
     with open(tmp_path / "stationary_table.csv", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
