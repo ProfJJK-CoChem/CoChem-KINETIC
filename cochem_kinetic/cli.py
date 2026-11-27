@@ -16,6 +16,8 @@ import argparse
 import json
 import logging
 import math
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -576,6 +578,22 @@ def _cmd_validate_stoich(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_aimnet_python() -> str | None:
+    """Return non-empty $COCHEM_AIMNET_PYTHON from the environment, or None."""
+    raw = os.environ.get("COCHEM_AIMNET_PYTHON", "").strip()
+    return raw or None
+
+
+def _require_executable_python(executable: str, label: str) -> str:
+    """Fail closed if a configured isolated Python interpreter does not exist."""
+    if not Path(executable).is_file() and shutil.which(executable) is None:
+        raise FileNotFoundError(
+            f"{label} Python executable not found: {executable!r}. "
+            "Pass a valid interpreter path or update COCHEM_AIMNET_PYTHON."
+        )
+    return executable
+
+
 def _cmd_rxn_profile(args: argparse.Namespace) -> int:
     pressure_atm = _validated_pressure_atm(args)
     spec = get_builtin_spec(args.spec) if args.spec else None
@@ -621,10 +639,20 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2))
         return 0
 
-    # stage == "all": allow separate Python silos if --aimnet-python or --pyscf-python supplied
-    if args.aimnet_python or args.pyscf_python:
-        aimnet_py = args.aimnet_python or sys.executable
-        pyscf_py = args.pyscf_python or sys.executable
+    # stage == "all": allow separate Python silos if --aimnet-python, $COCHEM_AIMNET_PYTHON, or --pyscf-python supplied
+    resolved_aimnet_py = (args.aimnet_python or "").strip() or _default_aimnet_python()
+    resolved_pyscf_py = (args.pyscf_python or "").strip() or None
+    if resolved_aimnet_py or resolved_pyscf_py:
+        aimnet_py = (
+            _require_executable_python(resolved_aimnet_py, "AIMNet2")
+            if resolved_aimnet_py
+            else sys.executable
+        )
+        pyscf_py = (
+            _require_executable_python(resolved_pyscf_py, "PySCF")
+            if resolved_pyscf_py
+            else sys.executable
+        )
         base_flags = [
             "-m", "cochem_kinetic.cli", "rxn-profile",
             "--input-dir", str(args.input_dir),
@@ -736,7 +764,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rxn.add_argument("--benchmark-all-cpu", action="store_true")
     p_rxn.add_argument("--gas-phase-ftmw-lock", action="store_true")
     p_rxn.add_argument("--stage", choices=["all", "validate", "mlff", "dft", "assemble"], default="all")
-    p_rxn.add_argument("--aimnet-python", type=str, default=None, help="Optional isolated Python executable for AIMNet2 stage")
+    p_rxn.add_argument(
+        "--aimnet-python",
+        type=str,
+        default=_default_aimnet_python(),
+        help="Optional isolated Python executable for AIMNet2 stage (defaults to $COCHEM_AIMNET_PYTHON when set)",
+    )
     p_rxn.add_argument("--pyscf-python", type=str, default=None, help="Optional isolated Python executable for PySCF stage")
     p_rxn.set_defaults(func=_cmd_rxn_profile)
 
