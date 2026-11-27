@@ -1,9 +1,9 @@
 ---
 schema: cochem-srs/5.0
 repo: CoChem-KINETIC
-status: ACTIVE_CORE (CHEM 312 rxn-profile operational; VTST/MECP and CLI expansion pending)
+status: ACTIVE_CORE (CHEM 312 rxn-profile with COCHEM_AIMNET_PYTHON discovery operational; VTST/MECP and CLI expansion pending)
 pipeline_baseline: 5.0.0
-source_commit: 49fda21d8956106def5a36a017eac3b3d16086d5
+source_commit: 1efc990b2ff1213411ad9d3efd7d7e4fb856b094
 decision_ref: swarm-1126-8efd
 ---
 
@@ -16,7 +16,7 @@ decision_ref: swarm-1126-8efd
 The package ships two Python trees configured in `pyproject.toml` (`include = ["cochem_kinetic*", "kinetic_core*"]`, 40 production `.py` files, 0 `NotImplementedError` stubs):
 - **Primary v5.0.0 Package (`cochem_kinetic/`):** `cochem_kinetic/cli.py`, `cochem_kinetic/rxn_profile.py`, `cochem_kinetic/chem312_specs.py`, `cochem_kinetic/provider.py`, `cochem_kinetic/math/thermodynamics.py`, `cochem_kinetic/math/tunneling.py`, `cochem_kinetic/math/laplace.py`, `cochem_kinetic/engine/rrkm_theory.py`, `cochem_kinetic/engine/master_equation.py`, `cochem_kinetic/engine/nonadiabatic.py`, `cochem_kinetic/engine/hpc_dispatcher.py`, and `cochem_kinetic/literature/diffusion_mapping.py`.
 - **Legacy v4 Core (`kinetic_core/`):** `kinetic_core/thermo.py`, `kinetic_core/jax_cineb.py`, `kinetic_core/mace_pre_opt.py`, `kinetic_core/aimd_hoover.py`, `kinetic_core/irc_tracer.py`, `kinetic_core/cochem_pes_store.py`, and `kinetic_core/dispatcher.py`.
-- **CLI Entrypoint:** `cochem-kinetic = "cochem_kinetic.cli:main"` exposing 3 subcommands (`list-specs`, `validate-stoich`, `rxn-profile`).
+- **CLI Entrypoint:** `cochem-kinetic = "cochem_kinetic.cli:main"` exposing 3 subcommands (`list-specs`, `validate-stoich`, `rxn-profile`), with `--aimnet-python` defaulting via `$COCHEM_AIMNET_PYTHON` auto-discovery in `cochem_kinetic/cli.py` (commit `1efc990` / B-04).
 
 ## 2. Pipeline 5.0.0 Architecture Alignment & Resolved Conflicts
 
