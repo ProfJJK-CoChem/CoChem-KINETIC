@@ -25,12 +25,16 @@ Stages:
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import hashlib
 import json
 import logging
 import math
+import os
+import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +43,9 @@ import numpy as np
 from cochem_kinetic.chem312_specs import (
     ELEMENTARY_STATIONARY_STATES,
     STATIONARY_STATES,
-    formula_from_symbols,
     masses_from_symbols,
     read_xyz,
     resolve_solvent_eps,
-    validate_stationary_stoichiometry,
-    write_multi_xyz,
     write_xyz,
 )
 from cochem_kinetic.math.thermodynamics import grimes_qrrho_entropy
@@ -473,20 +474,63 @@ def compute_rrho_thermochemistry(
 # =============================================================================
 
 
+@contextlib.contextmanager
+def redirect_stdout_to_stderr() -> Iterator[None]:
+    """
+    Redirect Python ``sys.stdout`` (and OS file descriptor 1 when stdout is the
+    real process stdout) to ``stderr`` so third-party initialization banners
+    (e.g. NVIDIA ``Warp ... initialized`` from AIMNet2) never corrupt JSON
+    emitted on stdout.
+    """
+    use_fd_redirect = False
+    saved_stdout_fd: int | None = None
+    stderr_fd: int | None = None
+    if sys.stdout is sys.__stdout__:
+        try:
+            stdout_fd = sys.stdout.fileno()
+            stderr_fd = sys.stderr.fileno()
+            if stdout_fd == 1 and stderr_fd >= 0:
+                use_fd_redirect = True
+        except Exception:
+            use_fd_redirect = False
+
+    if use_fd_redirect and stderr_fd is not None:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved_stdout_fd = os.dup(1)
+        os.dup2(stderr_fd, 1)
+
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            yield
+    finally:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        if saved_stdout_fd is not None:
+            try:
+                os.dup2(saved_stdout_fd, 1)
+            finally:
+                os.close(saved_stdout_fd)
+
+
 def build_aimnet2_calculator(
     charge: int = 0,
     multiplicity: int = 1,
     model: str = "aimnet2",
 ) -> Any:
     """Builds an official charge-aware AIMNet2ASE calculator (raises RuntimeError if unavailable)."""
-    try:
-        from aimnet.calculators import AIMNet2ASE
-    except ImportError as exc:
-        raise RuntimeError(
-            "Charge-aware 'aimnet' package is not installed in this Python environment. "
-            "Install aimnet>=0.2.0 or pass --aimnet-python pointing to the AIMNet2 venv."
-        ) from exc
-    return AIMNet2ASE(model, charge=int(charge), mult=int(multiplicity))
+    with redirect_stdout_to_stderr():
+        try:
+            from aimnet.calculators import AIMNet2ASE
+        except ImportError as exc:
+            raise RuntimeError(
+                "Charge-aware 'aimnet' package is not installed in this Python environment. "
+                "Install aimnet>=0.2.0 or pass --aimnet-python pointing to the AIMNet2 venv."
+            ) from exc
+        return AIMNet2ASE(model, charge=int(charge), mult=int(multiplicity))
 
 
 def _make_ase_atoms(symbols: list[str], coords: np.ndarray, charge: int, multiplicity: int, calc: Any) -> Any:
@@ -1343,6 +1387,57 @@ def run_pyscf_single_point(
 # =============================================================================
 
 
+DEFAULT_COORDINATE_COLUMN: str = "forming_breaking_co"
+_RESERVED_STATIONARY_COLUMNS: frozenset[str] = frozenset(
+    {
+        "state",
+        "status",
+        "n_atoms",
+        "charge",
+        "multiplicity",
+        "n_imag",
+        "imag_freq_cm1",
+        "e_dft_ha",
+        "zpe_ha",
+        "h_tot_ha",
+        "g_rrho_ha",
+        "g_qrrho_ha",
+        "delta_e_kcal",
+        "delta_h_kcal",
+        "delta_g_rrho_kcal",
+        "delta_g_qrrho_kcal",
+        "dft_wall_s",
+        "dft_engine",
+    }
+)
+
+
+def _resolve_coordinate_column(
+    coordinate_label: str | None,
+    metadata: dict[str, Any],
+) -> str:
+    """Resolve and validate the active-coordinate CSV column name."""
+    raw = (
+        coordinate_label
+        if coordinate_label is not None
+        else metadata.get("coordinate_label", metadata.get("coordinate_column"))
+    )
+    if raw is None:
+        return DEFAULT_COORDINATE_COLUMN
+    cleaned = str(raw).strip()
+    if not cleaned:
+        raise ValueError("coordinate_label must be a non-empty string when provided.")
+    if any(ch in cleaned for ch in (",", "\n", "\r")):
+        raise ValueError(
+            f"coordinate_label must not contain commas or newlines, got {raw!r}."
+        )
+    if cleaned in _RESERVED_STATIONARY_COLUMNS:
+        raise ValueError(
+            f"coordinate_label {cleaned!r} collides with a reserved stationary_table.csv column."
+        )
+    return cleaned
+
+
 def assemble_and_export_profile(
     output_dir: str | Path,
     case_name: str,
@@ -1351,6 +1446,7 @@ def assemble_and_export_profile(
     stoich_report: dict[str, Any],
     irc_reports: dict[str, dict[str, Any]],
     metadata: dict[str, Any],
+    coordinate_label: str | None = None,
 ) -> dict[str, Any]:
     """
     Assembles relative energies (Delta E, ZPE, Delta H, Delta G_RRHO, Delta G_qRRHO)
@@ -1363,6 +1459,7 @@ def assemble_and_export_profile(
     out.mkdir(parents=True, exist_ok=True)
     xyz_dir = out / "geometries"
     xyz_dir.mkdir(parents=True, exist_ok=True)
+    coord_col = _resolve_coordinate_column(coordinate_label, metadata)
 
     requested_order = metadata.get("stationary_points")
     if requested_order:
@@ -1487,7 +1584,7 @@ def assemble_and_export_profile(
                 "multiplicity": stoich_report["multiplicity"],
                 "n_imag": n_imag,
                 "imag_freq_cm1": imag_str,
-                "forming_breaking_co": top_co,
+                coord_col: top_co,
                 "e_dft_ha": f"{e_ha:.10f}" if math.isfinite(e_ha) else "NaN",
                 "zpe_ha": f"{zpe_ha:.10f}" if math.isfinite(zpe_ha) else "NaN",
                 "h_tot_ha": f"{h_tot_ha:.10f}" if math.isfinite(h_tot_ha) else "NaN",
@@ -1516,6 +1613,11 @@ def assemble_and_export_profile(
         str(metadata.get("xc", "wb97x")),
         str(metadata.get("disp", "d3zero")),
     )
+    coord_md_header = (
+        "Key Active Bond"
+        if coord_col == DEFAULT_COORDINATE_COLUMN
+        else coord_col
+    )
     md_lines = [
         f"# {case_name} — {n_pts}-Stationary-Point Reaction Profile",
         "",
@@ -1525,12 +1627,12 @@ def assemble_and_export_profile(
         f"- **DFT Level:** `{dft_method_label}/{metadata.get('basis', 'def2-tzvpp')}` + `{metadata.get('solvation_model', 'pcm').upper()}({metadata.get('solvent_name', 'acetonitrile')}, eps={metadata.get('eps', 'N/A')})`",
         f"- **Thermochemistry Temperature / Pressure:** `{metadata.get('temp_k', 298.15)} K`, `{metadata.get('pressure_atm', 1.0)} atm` (AIMNet2 Hessian + RRHO / Grimme qRRHO)",
         "",
-        "| State | Status | N_imag | Imag Freq (cm^-1) | Key Active Bond | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",
+        f"| State | Status | N_imag | Imag Freq (cm^-1) | {coord_md_header} | E_DFT (Ha) | dE (kcal/mol) | dH (kcal/mol) | dG_RRHO (kcal/mol) | dG_qRRHO (kcal/mol) | DFT Time (s) |",
         "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
         md_lines.append(
-            f"| {r['state']} | {r['status']} | {r['n_imag']} | {r['imag_freq_cm1']} | {r['forming_breaking_co'] or '-'} | "
+            f"| {r['state']} | {r['status']} | {r['n_imag']} | {r['imag_freq_cm1']} | {r[coord_col] or '-'} | "
             f"{r['e_dft_ha']} | {r['delta_e_kcal']} | {r['delta_h_kcal']} | {r['delta_g_rrho_kcal']} | {r['delta_g_qrrho_kcal']} | {r['dft_wall_s']} |"
         )
 
@@ -1605,6 +1707,7 @@ def assemble_and_export_profile(
     )
     metadata_out = dict(metadata)
     metadata_out.setdefault("pressure_atm", eff_pressure_atm)
+    metadata_out["coordinate_label"] = coord_col
 
     results_payload: dict[str, Any] = {
         "schema_version": "cochem.kinetic.rxn-profile/1",

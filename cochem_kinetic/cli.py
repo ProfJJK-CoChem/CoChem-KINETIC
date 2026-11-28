@@ -4,10 +4,14 @@ CoChem-KINETIC Command-Line Interface (`cochem-kinetic`)
 Registered via [project.scripts] in pyproject.toml.
 
 Subcommands:
-  - rxn-profile     : Run or stage a 5-stationary-point charge-aware reaction profile
-                      (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC + PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM).
-  - validate-stoich : Strictly validate atom, element, charge, spin, and clash balance across XYZs.
-  - list-specs      : List built-in CHEM 312 Spring 2027 balanced reaction specifications.
+  - rxn-profile     : Run or stage a 5- or 3-stationary-point charge-aware reaction
+                      profile (AIMNet2 CI-NEB + P-RFO/Sella TS + Hessian + IRC +
+                      PySCF DF-wB97X-D3(0)/def2-TZVPP + PCM).
+  - validate-stoich : Strictly validate atom, element, charge, spin, and clash
+                      balance across XYZs.
+  - list-specs      : List built-in CHEM 312 Spring 2027 balanced reaction specs.
+  - eyring          : Evaluate Eyring TST rate constants k(T) with optional Wigner
+                      and exact 1D Eckart tunneling corrections.
 """
 
 from __future__ import annotations
@@ -30,14 +34,20 @@ from cochem_kinetic.chem312_specs import (
     STATIONARY_STATES,
     get_builtin_spec,
     list_builtin_specs,
-    read_xyz,
     resolve_solvent_eps,
     validate_stationary_stoichiometry,
     write_multi_xyz,
     write_xyz,
 )
+from cochem_kinetic.math.tunneling import (
+    calculate_eckart_tunneling,
+    calculate_wigner_correction,
+)
 from cochem_kinetic.rxn_profile import (
     ALL_CANDIDATE_STATES,
+    KB_J_K,
+    PLANCK_H,
+    R_KCAL_MOL_K,
     analyze_stationary_point_aimnet2,
     assemble_and_export_profile,
     build_aimnet2_calculator,
@@ -45,14 +55,29 @@ from cochem_kinetic.rxn_profile import (
     discover_midpoint_intermediate_aimnet2,
     load_reaction_inputs,
     optimize_ts_aimnet2,
+    redirect_stdout_to_stderr,
     relax_minimum_aimnet2,
     resolve_state_xyz_path,
     run_cineb_aimnet2,
     run_pyscf_single_point,
     verify_ts_irc_aimnet2,
 )
+from kinetic_core.thermo import calculate_eyring_rate
 
 logger = logging.getLogger("cochem_kinetic.cli")
+
+
+def _finite_float(value: str) -> float:
+    """Argparse type enforcing a finite floating-point value."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Expected a finite float, got {value!r}."
+        ) from exc
+    if not math.isfinite(parsed):
+        raise argparse.ArgumentTypeError(f"Value must be finite, got {value!r}.")
+    return parsed
 
 
 def _positive_float(value: str) -> float:
@@ -500,6 +525,7 @@ def _run_assemble_stage(
         "R -> TS -> P" if active_states == ELEMENTARY_STATIONARY_STATES else "R -> TS1 -> Int_tet -> TS2 -> P"
     )
     pressure_atm = _validated_pressure_atm(args, fallback=float(mlff_data.get("pressure_atm", 1.0)))
+    coord_label = getattr(args, "coordinate_label", None)
     metadata = {
         "case_name": case_name,
         "pathway_mode": mlff_data.get(
@@ -521,6 +547,8 @@ def _run_assemble_stage(
         "dft_engine": args.dft_engine,
         "aimnet_model": args.aimnet_model,
     }
+    if coord_label is not None:
+        metadata["coordinate_label"] = coord_label
     return assemble_and_export_profile(
         output_dir=out_dir,
         case_name=case_name,
@@ -529,6 +557,7 @@ def _run_assemble_stage(
         stoich_report=mlff_data["stoichiometry"],
         irc_reports=mlff_data["irc"],
         metadata=metadata,
+        coordinate_label=coord_label,
     )
 
 
@@ -594,6 +623,228 @@ def _require_executable_python(executable: str, label: str) -> str:
     return executable
 
 
+def _run_stage_subprocess(cmd: list[str]) -> None:
+    """
+    Execute an isolated stage subprocess while capturing its stdout and forwarding
+    any third-party banner noise (e.g. NVIDIA Warp initialization) to stderr so
+    parent stdout remains strictly parseable JSON.
+    """
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, check=False)
+    if proc.stdout:
+        sys.stderr.write(proc.stdout.decode("utf-8", errors="replace"))
+        sys.stderr.flush()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=proc.stdout)
+
+
+def _parse_temps_csv(raw: str) -> list[float]:
+    """Parse a comma-separated list of strictly positive temperatures (K)."""
+    tokens = [tok.strip() for tok in str(raw).split(",")]
+    if not tokens or any(tok == "" for tok in tokens):
+        raise ValueError(f"--temps must be a comma-separated list of positive Kelvin values, got {raw!r}.")
+    temps: list[float] = []
+    for tok in tokens:
+        try:
+            val = float(tok)
+        except ValueError as exc:
+            raise ValueError(f"Invalid temperature token {tok!r} in --temps.") from exc
+        if not math.isfinite(val) or val <= 0.0:
+            raise ValueError(f"Temperature must be finite and > 0 K, got {tok!r}.")
+        temps.append(val)
+    return temps
+
+
+def _compute_eyring_payload(
+    *,
+    dg_ddagger_kcal: float | None,
+    dh_ddagger_kcal: float | None,
+    ds_ddagger_cal: float | None,
+    nu_imag_cm1: float | None,
+    vf_kcal: float | None,
+    vr_kcal: float | None,
+    temps_k: list[float],
+    reaction_order: int = 1,
+    pressure_atm: float = 1.0,
+) -> dict[str, Any]:
+    """Evaluate Eyring TST k(T) and optional Wigner/Eckart tunneling across temperatures."""
+    has_dg = dg_ddagger_kcal is not None
+    has_dh = dh_ddagger_kcal is not None
+    has_ds = ds_ddagger_cal is not None
+    if has_dg and (has_dh or has_ds):
+        raise ValueError(
+            "Provide either --dg-ddagger-kcal OR (--dh-ddagger-kcal and --ds-ddagger-cal), not both."
+        )
+    if not has_dg and not (has_dh and has_ds):
+        raise ValueError(
+            "Provide either --dg-ddagger-kcal OR both --dh-ddagger-kcal and --ds-ddagger-cal."
+        )
+    if (vf_kcal is None) != (vr_kcal is None):
+        raise ValueError("Both --vf-kcal and --vr-kcal must be supplied together for Eckart tunneling.")
+    if (vf_kcal is not None or vr_kcal is not None) and nu_imag_cm1 is None:
+        raise ValueError("--nu-imag-cm1 is required when --vf-kcal and --vr-kcal are provided.")
+
+    mode = "dg_direct" if has_dg else "dh_ds"
+    use_wigner = nu_imag_cm1 is not None
+    use_eckart = use_wigner and vf_kcal is not None and vr_kcal is not None
+    freq_abs = abs(float(nu_imag_cm1)) if nu_imag_cm1 is not None else None
+    r_l_atm = 0.082057366080960
+
+    rows: list[dict[str, Any]] = []
+    for temp_k in temps_k:
+        if has_dg:
+            assert dg_ddagger_kcal is not None
+            dg_kcal = float(dg_ddagger_kcal)
+        else:
+            assert dh_ddagger_kcal is not None and ds_ddagger_cal is not None
+            dg_kcal = float(dh_ddagger_kcal) - temp_k * (float(ds_ddagger_cal) / 1000.0)
+
+        k_tst = calculate_eyring_rate(
+            delta_g=dg_kcal,
+            wigner_coeff=1.0,
+            temp=temp_k,
+            reaction_order=reaction_order,
+            pressure_atm=pressure_atm,
+        )
+        dg_eff = dg_kcal
+        if reaction_order == 2:
+            molar_vol = (r_l_atm * temp_k) / pressure_atm
+            dg_eff += R_KCAL_MOL_K * temp_k * math.log(1.0 / molar_vol)
+        ln_k_over_t = math.log(KB_J_K / PLANCK_H) - dg_eff / (R_KCAL_MOL_K * temp_k)
+
+        row: dict[str, Any] = {
+            "temp_k": float(temp_k),
+            "inv_t_k": float(1.0 / temp_k),
+            "dg_ddagger_kcal": float(dg_kcal),
+            "k_tst": float(k_tst),
+            "ln_k_tst_over_t": float(ln_k_over_t),
+        }
+
+        k_eff = float(k_tst)
+        eff_method = "tst"
+        if use_wigner and freq_abs is not None:
+            kappa_wig = calculate_wigner_correction(freq_abs, temp_k)
+            k_wig = float(kappa_wig * k_tst)
+            row["kappa_wigner"] = float(kappa_wig)
+            row["k_wigner"] = k_wig
+            k_eff = k_wig
+            eff_method = "wigner"
+
+        if use_eckart and freq_abs is not None and vf_kcal is not None and vr_kcal is not None:
+            eck = calculate_eckart_tunneling(
+                imag_freq=freq_abs,
+                temp=temp_k,
+                V_f=float(vf_kcal),
+                V_r=float(vr_kcal),
+            )
+            kappa_eck = float(eck["kappa"])  # type: ignore[arg-type]
+            k_eck = float(kappa_eck * k_tst)
+            row["kappa_eckart"] = kappa_eck
+            row["k_eckart"] = k_eck
+            row["eckart_provenance_tag"] = eck["provenance_tag"]
+            row["eckart_warning"] = eck["warning"]
+            k_eff = k_eck
+            eff_method = "eckart"
+
+        row["k_effective"] = k_eff
+        row["effective_method"] = eff_method
+        if reaction_order == 1:
+            row["half_life_s"] = (math.log(2.0) / k_eff) if k_eff > 0.0 else None
+        rows.append(row)
+
+    eyring_regression: dict[str, Any] | None = None
+    distinct_temps = {r["temp_k"] for r in rows}
+    if len(distinct_temps) >= 2:
+        xs = np.array([r["inv_t_k"] for r in rows], dtype=np.float64)
+        ys = np.array([r["ln_k_tst_over_t"] for r in rows], dtype=np.float64)
+        x_mean = float(np.mean(xs))
+        y_mean = float(np.mean(ys))
+        sxx = float(np.sum((xs - x_mean) ** 2))
+        sxy = float(np.sum((xs - x_mean) * (ys - y_mean)))
+        slope = sxy / sxx
+        intercept = y_mean - slope * x_mean
+        y_pred = slope * xs + intercept
+        ss_res = float(np.sum((ys - y_pred) ** 2))
+        ss_tot = float(np.sum((ys - y_mean) ** 2))
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0.0 else 1.0
+        eyring_regression = {
+            "n_points": len(rows),
+            "slope_k": float(slope),
+            "intercept": float(intercept),
+            "r_squared": float(r_squared),
+            "dh_ddagger_fit_kcal": float(-slope * R_KCAL_MOL_K),
+            "ds_ddagger_fit_cal": float(
+                (intercept - math.log(KB_J_K / PLANCK_H)) * (R_KCAL_MOL_K * 1000.0)
+            ),
+        }
+
+    return {
+        "schema_version": "cochem.kinetic.eyring/1",
+        "mode": mode,
+        "reaction_order": int(reaction_order),
+        "pressure_atm": float(pressure_atm),
+        "rate_units": "s^-1" if reaction_order == 1 else "L mol^-1 s^-1",
+        "inputs": {
+            "dg_ddagger_kcal": float(dg_ddagger_kcal) if dg_ddagger_kcal is not None else None,
+            "dh_ddagger_kcal": float(dh_ddagger_kcal) if dh_ddagger_kcal is not None else None,
+            "ds_ddagger_cal": float(ds_ddagger_cal) if ds_ddagger_cal is not None else None,
+            "nu_imag_cm1": float(nu_imag_cm1) if nu_imag_cm1 is not None else None,
+            "vf_kcal": float(vf_kcal) if vf_kcal is not None else None,
+            "vr_kcal": float(vr_kcal) if vr_kcal is not None else None,
+            "temps_k": [float(t) for t in temps_k],
+        },
+        "rows": rows,
+        "eyring_regression": eyring_regression,
+    }
+
+
+def _cmd_eyring(args: argparse.Namespace) -> int:
+    temps_k = _parse_temps_csv(args.temps)
+    pressure_atm = _validated_pressure_atm(args)
+    payload = _compute_eyring_payload(
+        dg_ddagger_kcal=args.dg_ddagger_kcal,
+        dh_ddagger_kcal=args.dh_ddagger_kcal,
+        ds_ddagger_cal=args.ds_ddagger_cal,
+        nu_imag_cm1=args.nu_imag_cm1,
+        vf_kcal=args.vf_kcal,
+        vr_kcal=args.vr_kcal,
+        temps_k=temps_k,
+        reaction_order=int(args.reaction_order),
+        pressure_atm=pressure_atm,
+    )
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    units = payload["rate_units"]
+    has_wigner = args.nu_imag_cm1 is not None
+    has_eckart = has_wigner and args.vf_kcal is not None and args.vr_kcal is not None
+    header = [f"{'T (K)':>10s}", f"{'dG‡ (kcal/mol)':>15s}", f"{f'k_TST ({units})':>18s}"]
+    if has_wigner:
+        header.extend([f"{'k_Wig_kappa':>12s}", f"{f'k_Wig ({units})':>18s}"])
+    if has_eckart:
+        header.extend([f"{'k_Eck_kappa':>12s}", f"{f'k_Eck ({units})':>18s}"])
+    print("  ".join(header))
+    print("-" * len("  ".join(header)))
+    for row in payload["rows"]:
+        cols = [
+            f"{row['temp_k']:10.2f}",
+            f"{row['dg_ddagger_kcal']:15.4f}",
+            f"{row['k_tst']:18.6e}",
+        ]
+        if has_wigner:
+            cols.extend([f"{row['kappa_wigner']:12.4f}", f"{row['k_wigner']:18.6e}"])
+        if has_eckart:
+            cols.extend([f"{row['kappa_eckart']:12.4f}", f"{row['k_eckart']:18.6e}"])
+        print("  ".join(cols))
+    reg = payload.get("eyring_regression")
+    if reg is not None:
+        print(
+            f"\nEyring fit (ln(k_TST/T) vs 1/T): dH‡={reg['dh_ddagger_fit_kcal']:.4f} kcal/mol, "
+            f"dS‡={reg['ds_ddagger_fit_cal']:.4f} cal/(mol*K), R^2={reg['r_squared']:.6f}"
+        )
+    return 0
+
+
 def _cmd_rxn_profile(args: argparse.Namespace) -> int:
     pressure_atm = _validated_pressure_atm(args)
     spec = get_builtin_spec(args.spec) if args.spec else None
@@ -608,34 +859,38 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.stage == "validate":
-        loaded = load_reaction_inputs(
-            Path(args.input_dir),
-            required_states=("R", "P"),
-            candidate_states=ALL_CANDIDATE_STATES,
-        )
-        report = validate_stationary_stoichiometry(
-            loaded,
-            expected_charge=charge,
-            expected_multiplicity=mult,
-            expected_formula=args.expected_formula,
-            require_same_atom_order=True,
-        )
-        report["input_mode"] = detect_input_mode(loaded)
-        report["temp_k"] = float(args.temp_k)
-        report["pressure_atm"] = pressure_atm
+        with redirect_stdout_to_stderr():
+            loaded = load_reaction_inputs(
+                Path(args.input_dir),
+                required_states=("R", "P"),
+                candidate_states=ALL_CANDIDATE_STATES,
+            )
+            report = validate_stationary_stoichiometry(
+                loaded,
+                expected_charge=charge,
+                expected_multiplicity=mult,
+                expected_formula=args.expected_formula,
+                require_same_atom_order=True,
+            )
+            report["input_mode"] = detect_input_mode(loaded)
+            report["temp_k"] = float(args.temp_k)
+            report["pressure_atm"] = pressure_atm
         print(json.dumps(report, indent=2))
         return 0
 
     if args.stage == "mlff":
-        _run_mlff_stage(args, out_dir, charge, mult, case_name, eq)
+        with redirect_stdout_to_stderr():
+            _run_mlff_stage(args, out_dir, charge, mult, case_name, eq)
         return 0
 
     if args.stage == "dft":
-        _run_dft_stage(args, out_dir, charge, mult)
+        with redirect_stdout_to_stderr():
+            _run_dft_stage(args, out_dir, charge, mult)
         return 0
 
     if args.stage == "assemble":
-        summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
+        with redirect_stdout_to_stderr():
+            summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
         print(json.dumps(summary, indent=2))
         return 0
 
@@ -681,6 +936,8 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
             base_flags.extend(["--eps", str(args.eps)])
         if args.expected_formula:
             base_flags.extend(["--expected-formula", args.expected_formula])
+        if args.coordinate_label:
+            base_flags.extend(["--coordinate-label", str(args.coordinate_label)])
         if args.skip_min_opt:
             base_flags.append("--skip-min-opt")
         if args.force_neb:
@@ -690,15 +947,17 @@ def _cmd_rxn_profile(args: argparse.Namespace) -> int:
         if args.gas_phase_ftmw_lock:
             base_flags.append("--gas-phase-ftmw-lock")
 
-        subprocess.run([aimnet_py, *base_flags, "--stage", "mlff"], check=True)
-        subprocess.run([pyscf_py, *base_flags, "--stage", "dft"], check=True)
-        summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
+        _run_stage_subprocess([aimnet_py, *base_flags, "--stage", "mlff"])
+        _run_stage_subprocess([pyscf_py, *base_flags, "--stage", "dft"])
+        with redirect_stdout_to_stderr():
+            summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
         print(json.dumps(summary, indent=2))
         return 0
 
-    _run_mlff_stage(args, out_dir, charge, mult, case_name, eq)
-    _run_dft_stage(args, out_dir, charge, mult)
-    summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
+    with redirect_stdout_to_stderr():
+        _run_mlff_stage(args, out_dir, charge, mult, case_name, eq)
+        _run_dft_stage(args, out_dir, charge, mult)
+        summary = _run_assemble_stage(args, out_dir, charge, mult, case_name, eq)
     print(json.dumps(summary, indent=2))
     return 0
 
@@ -771,13 +1030,94 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional isolated Python executable for AIMNet2 stage (defaults to $COCHEM_AIMNET_PYTHON when set)",
     )
     p_rxn.add_argument("--pyscf-python", type=str, default=None, help="Optional isolated Python executable for PySCF stage")
+    p_rxn.add_argument(
+        "--coordinate-label",
+        type=str,
+        default=None,
+        help="Optional custom active-coordinate column header for stationary_table.csv (default: forming_breaking_co).",
+    )
+    p_rxn.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit clean machine-readable JSON summary on stdout (default for validate/assemble/all; routes third-party stdout noise to stderr).",
+    )
     p_rxn.set_defaults(func=_cmd_rxn_profile)
+
+    p_eyr = sub.add_parser(
+        "eyring",
+        help="Compute Eyring TST rate constants k(T) with optional Wigner and exact 1D Eckart tunneling.",
+    )
+    p_eyr.add_argument(
+        "--dg-ddagger-kcal",
+        type=_finite_float,
+        default=None,
+        help="Activation Gibbs free energy dG‡ in kcal/mol (mutually exclusive with --dh-ddagger-kcal / --ds-ddagger-cal).",
+    )
+    p_eyr.add_argument(
+        "--dh-ddagger-kcal",
+        type=_finite_float,
+        default=None,
+        help="Activation enthalpy dH‡ in kcal/mol (requires --ds-ddagger-cal).",
+    )
+    p_eyr.add_argument(
+        "--ds-ddagger-cal",
+        type=_finite_float,
+        default=None,
+        help="Activation entropy dS‡ in cal/(mol*K) (requires --dh-ddagger-kcal).",
+    )
+    p_eyr.add_argument(
+        "--nu-imag-cm1",
+        type=_finite_float,
+        default=None,
+        help="Transition-state imaginary frequency in cm^-1 (signed or magnitude) for Wigner/Eckart tunneling.",
+    )
+    p_eyr.add_argument(
+        "--vf-kcal",
+        type=_finite_float,
+        default=None,
+        help="Forward barrier height V_f in kcal/mol for exact 1D Eckart tunneling (requires --vr-kcal and --nu-imag-cm1).",
+    )
+    p_eyr.add_argument(
+        "--vr-kcal",
+        type=_finite_float,
+        default=None,
+        help="Reverse barrier height V_r in kcal/mol for exact 1D Eckart tunneling (requires --vf-kcal and --nu-imag-cm1).",
+    )
+    p_eyr.add_argument(
+        "--temps",
+        type=str,
+        default="298.15",
+        help="Comma-separated temperatures in Kelvin (default: 298.15; e.g. 298.15,400,500,600).",
+    )
+    p_eyr.add_argument(
+        "--reaction-order",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="Reaction molecularity/order (1 for unimolecular s^-1, 2 for bimolecular L mol^-1 s^-1).",
+    )
+    p_eyr.add_argument(
+        "--pressure-atm",
+        type=_positive_float,
+        default=1.0,
+        help="Ideal-gas reference pressure in atm for bimolecular standard-state conversion (default: 1.0).",
+    )
+    p_eyr.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON output to stdout.",
+    )
+    p_eyr.set_defaults(func=_cmd_eyring)
 
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args))
